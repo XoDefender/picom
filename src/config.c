@@ -133,9 +133,8 @@ bool parse_long(const char *s, long *dest) {
 		log_error("Invalid number: %s", s);
 		return false;
 	}
-	while (isspace((unsigned char)*endptr)) {
+	while (isspace((unsigned char)*endptr))
 		++endptr;
-	}
 	if (*endptr) {
 		log_error("Trailing characters: %s", s);
 		return false;
@@ -183,19 +182,20 @@ const char *parse_readnum(const char *src, double *dest) {
 }
 
 enum blur_method parse_blur_method(const char *src) {
-	if (strcmp(src, "box") == 0) {
-		return BLUR_METHOD_BOX;
-	}
-	if (strcmp(src, "dual_kawase") == 0) {
-		return BLUR_METHOD_DUAL_KAWASE;
-	}
-	if (strcmp(src, "gaussian") == 0) {
-		return BLUR_METHOD_GAUSSIAN;
-	}
 	if (strcmp(src, "kernel") == 0) {
 		return BLUR_METHOD_KERNEL;
-	}
-	if (strcmp(src, "none") == 0) {
+	} else if (strcmp(src, "box") == 0) {
+		return BLUR_METHOD_BOX;
+	} else if (strcmp(src, "gaussian") == 0) {
+		return BLUR_METHOD_GAUSSIAN;
+	} else if (strcmp(src, "dual_kawase") == 0) {
+		return BLUR_METHOD_DUAL_KAWASE;
+	} else if (strcmp(src, "kawase") == 0) {
+		log_warn("Blur method 'kawase' has been renamed to 'dual_kawase'. "
+		         "Interpreted as 'dual_kawase', but this will stop working "
+		         "soon.");
+		return BLUR_METHOD_DUAL_KAWASE;
+	} else if (strcmp(src, "none") == 0) {
 		return BLUR_METHOD_NONE;
 	}
 	return BLUR_METHOD_INVALID;
@@ -216,14 +216,12 @@ conv *parse_blur_kern(const char *src, const char **endptr, bool *hasneg) {
 
 	// Get matrix width and height
 	double val = 0.0;
-	if (src == (pc = parse_readnum(src, &val))) {
+	if (src == (pc = parse_readnum(src, &val)))
 		goto err1;
-	}
 	src = pc;
 	width = (int)val;
-	if (src == (pc = parse_readnum(src, &val))) {
+	if (src == (pc = parse_readnum(src, &val)))
 		goto err1;
-	}
 	src = pc;
 	height = (int)val;
 
@@ -236,10 +234,9 @@ conv *parse_blur_kern(const char *src, const char **endptr, bool *hasneg) {
 		log_error("Blur kernel width/height must be odd.");
 		goto err1;
 	}
-	if (width > 16 || height > 16) {
+	if (width > 16 || height > 16)
 		log_warn("Blur kernel width/height too large, may slow down"
 		         "rendering, and/or consume lots of memory");
-	}
 
 	// Allocate memory
 	conv *matrix = cvalloc(sizeof(conv) + (size_t)(width * height) * sizeof(double));
@@ -365,9 +362,8 @@ struct conv **parse_blur_kern_lst(const char *src, bool *hasneg, int *count) {
 	*hasneg = false;
 	for (unsigned int i = 0;
 	     i < sizeof(CONV_KERN_PREDEF) / sizeof(CONV_KERN_PREDEF[0]); ++i) {
-		if (!strcmp(CONV_KERN_PREDEF[i].name, src)) {
+		if (!strcmp(CONV_KERN_PREDEF[i].name, src))
 			return parse_blur_kern_lst(CONV_KERN_PREDEF[i].kern_str, hasneg, count);
-		}
 	}
 
 	int nkernels = 1;
@@ -512,38 +508,198 @@ parse_geometry_end:
 	return true;
 }
 
-/**
- * Parse a list of window rules, prefixed with a number, separated by a ':'
- */
-bool parse_numeric_window_rule(c2_lptr_t **res, const char *src, long min, long max) {
-	if (!src) {
-		return false;
+// Kirill
+enum open_window_animation parse_open_window_animation(const char *src) {
+	if (strcmp(src, "none") == 0) {
+		return OPEN_WINDOW_ANIMATION_NONE;
+	} else if (strcmp(src, "fly-in") == 0) {
+		return OPEN_WINDOW_ANIMATION_FLYIN;
+	} else if (strcmp(src, "zoom") == 0) {
+		return OPEN_WINDOW_ANIMATION_ZOOM;
+	} else if (strcmp(src, "slide-up") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_UP;
+	} else if (strcmp(src, "slide-down") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_DOWN;
+	} else if (strcmp(src, "slide-left") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_LEFT;
+	} else if (strcmp(src, "slide-right") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_RIGHT;
+	} else if (strcmp(src, "slide-out") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_OUT;
+	} else if (strcmp(src, "slide-in") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_IN;
+	} else if (strcmp(src, "slide-out-center") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_OUT_CENTER;
+	} else if (strcmp(src, "slide-in-center") == 0) {
+		return OPEN_WINDOW_ANIMATION_SLIDE_IN_CENTER;
+	} else if (strcmp(src, "minimize") == 0 || strcmp(src, "maximize") == 0) {
+		return OPEN_WINDOW_ANIMATION_MINIMIZE;
+	} else if (strcmp(src, "squeeze") == 0) {
+		return OPEN_WINDOW_ANIMATION_SQUEEZE;
+	} else if (strcmp(src, "squeeze-bottom") == 0) {
+		return OPEN_WINDOW_ANIMATION_SQUEEZE_BOTTOM;
 	}
 
-	// Find numeric value
+	return OPEN_WINDOW_ANIMATION_INVALID;
+}
+
+/**
+ * Parse a list of opacity rules.
+ */
+bool parse_rule_opacity(c2_lptr_t **res, const char *src) {
+	// Find opacity value
 	char *endptr = NULL;
 	long val = strtol(src, &endptr, 0);
 	if (!endptr || endptr == src) {
-		log_error("No number specified: %s", src);
+		log_error("No opacity specified: %s", src);
 		return false;
 	}
-
-	if (val < min || val > max) {
-		log_error("Number not in range (%ld <= n <= %ld): %s", min, max, src);
+	if (val > 100 || val < 0) {
+		log_error("Opacity %ld invalid: %s", val, src);
 		return false;
 	}
 
 	// Skip over spaces
-	while (*endptr && isspace((unsigned char)*endptr)) {
+	while (*endptr && isspace((unsigned char)*endptr))
 		++endptr;
-	}
 	if (':' != *endptr) {
-		log_error("Number separator (':') not found: %s", src);
+		log_error("Opacity terminator not found: %s", src);
 		return false;
 	}
 	++endptr;
 
 	// Parse pattern
+	// I hope 1-100 is acceptable for (void *)
+	return c2_parse(res, endptr, (void *)val);
+}
+
+int process_rule_condition(char** endptr, const char *src)
+{
+	if (!*endptr || *endptr == src) {
+		log_error("No value specified: %s", src);
+		return false;
+	}
+
+	while (**endptr && isspace((unsigned char)**endptr))
+		++*endptr;
+	if (':' != **endptr) {
+		log_error("Value terminator not found: %s", src);
+		return false;
+	}
+	++*endptr;
+
+	return true;
+}
+
+/**
+ * Kirill
+ * Parse a list of corners rounding rules (find value/condition)
+ */
+bool parse_rule_corners(c2_lptr_t **res, const char *src) {
+	char *endptr = NULL;
+	long val = strtol(src, &endptr, 0);
+	if (val < 0) {
+		log_error("The value is %ld invalid: %s", val, src);
+		return false;
+	}
+
+	process_rule_condition(&endptr, src);
+
+	return c2_parse(res, endptr, (void *)val);
+}
+
+/**
+ * Kirill
+ * Parse a list of animating rules (find value/condition)
+ */
+bool parse_rule_animation(c2_lptr_t **res, const char *src) {
+	const char term[] = ":";
+	long val;
+    char cond[256];
+
+    strncpy(cond, src, sizeof(cond) - 1);
+    cond[sizeof(cond) - 1] = '\0';
+
+    char *endptr = strchr(cond, term[0]);
+    process_rule_condition(&endptr, src);
+
+	val = (long)parse_open_window_animation(strtok(cond, term));
+	if (val < 0) {
+		log_error("The value is %ld invalid: %s", val, src);
+		return false;
+	}
+
+	return c2_parse(res, endptr, (void *)val);
+}
+
+/**
+ * Kirill
+ * Parse a list of shadow color rules (find value/condition)
+ */
+bool parse_rule_shadow_color(c2_lptr_t **res, const char *src) {
+    char cond[256];
+    strncpy(cond, src, sizeof(cond) - 1);
+    cond[sizeof(cond) - 1] = '\0';
+
+	long val;
+    if (sscanf(cond, "#%lx", &val) != 1) {
+        log_error("Invalid shadow color format: %s", src);
+        val = 0;
+    }
+
+    char *endptr = strchr(cond, ':');
+    process_rule_condition(&endptr, src);
+
+    return c2_parse(res, endptr, (void *)val);
+}
+
+/**
+ * Kirill
+ * Parse a list of shadow rules
+ */
+bool parse_rule_shadow(c2_lptr_t **res, const char *src) {
+	char *endptr = NULL;
+	long val = strtol(src, &endptr, 0);
+	process_rule_condition(&endptr, src);
+
+	return c2_parse(res, endptr, (void *)val);
+}
+
+/**
+ * Kirill
+ * Parse a list of blur method rules (find value/condition)
+ */
+bool parse_rule_blur_method(c2_lptr_t **res, const char *src) {
+	const char term[] = ":";
+	long val;
+    char cond[256];
+
+    strncpy(cond, src, sizeof(cond) - 1);
+    cond[sizeof(cond) - 1] = '\0';
+
+    char *endptr = strchr(cond, term[0]);
+    process_rule_condition(&endptr, src);
+
+	val = (long)parse_blur_method(strtok(cond, term));
+
+	return c2_parse(res, endptr, (void *)val);
+}
+
+/**
+ * Kirill
+ * Parse a list of blur value rules (find value/condition)
+ */
+bool parse_rule_blur(c2_lptr_t **res, const char *src) {
+	char *endptr = NULL;
+
+	long val = strtol(src, &endptr, 0);
+	if (val < 0) {
+		log_error("The value is %ld invalid: %s", val, src);
+		return false;
+	}
+
+	process_rule_condition(&endptr, src);
+
 	return c2_parse(res, endptr, (void *)val);
 }
 
@@ -596,17 +752,15 @@ char *locate_auxiliary_file(const char *scope, const char *path, const char *inc
 	// Fall back to searching in user config directory
 	scoped_charp picom_scope = mstrjoin("/picom/", scope);
 	scoped_charp config_home = (char *)xdg_config_home();
-	if (config_home) {
-		char *ret = locate_auxiliary_file_at(config_home, picom_scope, path);
-		if (ret) {
-			return ret;
-		}
+	char *ret = locate_auxiliary_file_at(config_home, picom_scope, path);
+	if (ret) {
+		return ret;
 	}
 
 	// Fall back to searching in system config directory
 	auto config_dirs = xdg_config_dirs();
 	for (int i = 0; config_dirs[i]; i++) {
-		char *ret = locate_auxiliary_file_at(config_dirs[i], picom_scope, path);
+		ret = locate_auxiliary_file_at(config_dirs[i], picom_scope, path);
 		if (ret) {
 			free(config_dirs);
 			return ret;
@@ -614,7 +768,7 @@ char *locate_auxiliary_file(const char *scope, const char *path, const char *inc
 	}
 	free(config_dirs);
 
-	return NULL;
+	return ret;
 }
 
 /**
@@ -661,13 +815,11 @@ bool parse_rule_window_shader(c2_lptr_t **res, const char *src, const char *incl
  * Add a pattern to a condition linked list.
  */
 bool condlst_add(c2_lptr_t **pcondlst, const char *pattern) {
-	if (!pattern) {
+	if (!pattern)
 		return false;
-	}
 
-	if (!c2_parse(pcondlst, pattern, NULL)) {
+	if (!c2_parse(pcondlst, pattern, NULL))
 		exit(1);
-	}
 
 	return true;
 }
@@ -694,6 +846,10 @@ void set_default_winopts(options_t *opt, win_option_mask_t *mask, bool shadow_en
 		if (!mask[i].shadow) {
 			mask[i].shadow = true;
 			opt->wintype_option[i].shadow = shadow_enable;
+		}
+		if (!mask[i].shadow_active) {
+			mask[i].shadow_active = true;
+			opt->wintype_option[i].shadow_active = true;
 		}
 		if (!mask[i].fade) {
 			mask[i].fade = true;
@@ -725,6 +881,45 @@ void set_default_winopts(options_t *opt, win_option_mask_t *mask, bool shadow_en
 			mask[i].clip_shadow_above = true;
 			opt->wintype_option[i].clip_shadow_above = false;
 		}
+
+		// Kirill
+		if (!mask[i].animation) {
+			mask[i].animation = OPEN_WINDOW_ANIMATION_INVALID;
+			opt->wintype_option[i].animation = OPEN_WINDOW_ANIMATION_INVALID;
+		}
+
+		if (!mask[i].round_corners) {
+			mask[i].round_corners = true;
+			opt->wintype_option[i].corner_radius = INT_MAX;
+		}
+
+		if (!mask[i].shadow_radius) {
+			mask[i].shadow_radius = true;
+			opt->wintype_option[i].shadow_radius = INT_MAX;
+		}
+
+		if (!mask[i].shadow_opacity) {
+			mask[i].shadow_opacity = true;
+			opt->wintype_option[i].shadow_opacity = INT_MAX;
+		}
+
+		if (!mask[i].shadow_offset_x) {
+			mask[i].shadow_offset_x = true;
+			opt->wintype_option[i].shadow_offset_x = INT_MAX;
+		}
+
+		if (!mask[i].shadow_offset_y) {
+			mask[i].shadow_offset_y = true;
+			opt->wintype_option[i].shadow_offset_y = INT_MAX;
+		}
+
+		if (!mask[i].shadow_color) {
+			mask[i].shadow_color = false;
+			opt->wintype_option[i].shadow_color = (struct color){.red = NAN,
+																 .green = NAN,
+																 .blue = NAN,
+																 .alpha = NAN};
+		}
 	}
 }
 
@@ -750,7 +945,6 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 	    .logpath = NULL,
 
 	    .use_damage = true,
-	    .no_frame_pacing = false,
 
 	    .shadow_red = 0.0,
 	    .shadow_green = 0.0,
@@ -760,8 +954,8 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 	    .shadow_offset_y = -15,
 	    .shadow_opacity = .75,
 	    .shadow_blacklist = NULL,
-	    .shadow_ignore_shaped = false,
-	    .crop_shadow_to_monitor = false,
+	    .shadow_ignore_shaped = false, //alex: if true then no shadow with decor
+	    .xinerama_shadow_crop = false,
 	    .shadow_clip_list = NULL,
 
 	    .corner_radius = 0,
@@ -778,6 +972,8 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 	    .active_opacity = 1.0,
 	    .frame_opacity = 1.0,
 	    .detect_client_opacity = false,
+
+		.enable_transparency = true, //alex
 
 	    .blur_method = BLUR_METHOD_NONE,
 	    .blur_radius = 3,
@@ -804,7 +1000,18 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 
 	    .track_leader = false,
 
-	    .rounded_corners_blacklist = NULL
+	    .rounded_corners_blacklist = NULL,
+
+		.corners_rounding_rules = NULL, // Kirill
+
+		.animations = false,
+	    .animation_for_open_window = OPEN_WINDOW_ANIMATION_NONE,
+	    .animation_for_transient_window = OPEN_WINDOW_ANIMATION_NONE,
+       .animation_for_unmap_window = OPEN_WINDOW_ANIMATION_NONE,
+	    .animation_stiffness = 200.0,
+	    .animation_window_mass = 1.0,
+	    .animation_dampening = 25,
+	    .animation_clamping = true,
 	};
 	// clang-format on
 

@@ -40,8 +40,27 @@ enum backend {
 	NUM_BKEND,
 };
 
+enum open_window_animation {
+	OPEN_WINDOW_ANIMATION_NONE = 0,
+	OPEN_WINDOW_ANIMATION_FLYIN,
+	OPEN_WINDOW_ANIMATION_SLIDE_UP,
+	OPEN_WINDOW_ANIMATION_SLIDE_DOWN,
+	OPEN_WINDOW_ANIMATION_SLIDE_LEFT,
+	OPEN_WINDOW_ANIMATION_SLIDE_RIGHT,
+	OPEN_WINDOW_ANIMATION_SLIDE_IN,
+	OPEN_WINDOW_ANIMATION_SLIDE_OUT,
+	OPEN_WINDOW_ANIMATION_SLIDE_IN_CENTER,
+	OPEN_WINDOW_ANIMATION_SLIDE_OUT_CENTER,
+	OPEN_WINDOW_ANIMATION_ZOOM,
+	OPEN_WINDOW_ANIMATION_MINIMIZE,
+	OPEN_WINDOW_ANIMATION_SQUEEZE,
+	OPEN_WINDOW_ANIMATION_SQUEEZE_BOTTOM,
+	OPEN_WINDOW_ANIMATION_INVALID,
+};
+
 typedef struct win_option_mask {
 	bool shadow : 1;
+	bool shadow_active : 1;
 	bool fade : 1;
 	bool focus : 1;
 	bool blur_background : 1;
@@ -49,10 +68,18 @@ typedef struct win_option_mask {
 	bool redir_ignore : 1;
 	bool opacity : 1;
 	bool clip_shadow_above : 1;
+	bool round_corners : 1;
+	bool shadow_radius : 1;
+	bool shadow_opacity : 1;
+	bool shadow_offset_x : 1;
+	bool shadow_offset_y : 1;
+	bool shadow_color : 1;
+	enum open_window_animation animation;
 } win_option_mask_t;
 
 typedef struct win_option {
 	bool shadow;
+	bool shadow_active;
 	bool fade;
 	bool focus;
 	bool blur_background;
@@ -60,6 +87,13 @@ typedef struct win_option {
 	bool redir_ignore;
 	double opacity;
 	bool clip_shadow_above;
+	int corner_radius;
+	int shadow_radius;
+	int shadow_opacity;
+	int shadow_offset_x;
+	int shadow_offset_y;
+	struct color shadow_color;
+	enum open_window_animation animation;
 } win_option_t;
 
 enum blur_method {
@@ -140,8 +174,6 @@ typedef struct options {
 	bool vsync_use_glfinish;
 	/// Whether use damage information to help limit the area to paint
 	bool use_damage;
-	/// Disable frame pacing
-	bool no_frame_pacing;
 
 	// === Shadow ===
 	/// Red, green and blue tone of the shadow.
@@ -149,16 +181,32 @@ typedef struct options {
 	int shadow_radius;
 	int shadow_offset_x, shadow_offset_y;
 	double shadow_opacity;
+
+	bool shadow_active;
+	double shadow_red_active, shadow_green_active, shadow_blue_actives;
+	int shadow_radius_active;
+	int shadow_offset_x_active, shadow_offset_y_active;
+	double shadow_opacity_active;
+
 	/// argument string to shadow-exclude-reg option
 	char *shadow_exclude_reg_str;
 	/// Shadow blacklist. A linked list of conditions.
 	c2_lptr_t *shadow_blacklist;
 	/// Whether bounding-shaped window should be ignored.
 	bool shadow_ignore_shaped;
-	/// Whether to crop shadow to the very X RandR monitor.
-	bool crop_shadow_to_monitor;
+	/// Whether to crop shadow to the very Xinerama screen.
+	bool xinerama_shadow_crop;
 	/// Don't draw shadow over these windows. A linked list of conditions.
 	c2_lptr_t *shadow_clip_list;
+	/// rules for specifying shadow color for specific windows
+	c2_lptr_t* shadow_color_rules;
+	/// rules for specifying shadow opacity for specific windows
+	c2_lptr_t* shadow_opacity_rules;
+	/// rules for specifying shadow radius for specific windows
+	c2_lptr_t* shadow_radius_rules;
+	/// rules for specifying shadow offset for specific windows
+	c2_lptr_t* shadow_offset_x_rules;
+	c2_lptr_t* shadow_offset_y_rules;
 
 	// === Fading ===
 	/// How much to fade in in a single fading step.
@@ -190,6 +238,9 @@ typedef struct options {
 	/// managers that don't pass _NET_WM_WINDOW_OPACITY to frame windows.
 	bool detect_client_opacity;
 
+	///alex: transparency/opacity flag
+    bool enable_transparency; //alex
+
 	// === Other window processing ===
 	/// Blur method for background of semi-transparent windows
 	enum blur_method blur_method;
@@ -211,6 +262,11 @@ typedef struct options {
 	struct conv **blur_kerns;
 	/// Number of convolution kernels
 	int blur_kernel_count;
+	// Blur rules for controlling individual windows
+	c2_lptr_t* blur_size_rules;
+	c2_lptr_t* blur_deviation_rules;
+	c2_lptr_t* blur_strength_rules;
+	c2_lptr_t* blur_method_rules;
 	/// Custom fragment shader for painting windows
 	char *window_shader_fg;
 	/// Rules to change custom fragment shader for painting windows.
@@ -230,8 +286,32 @@ typedef struct options {
 	int corner_radius;
 	/// Rounded corners blacklist. A linked list of conditions.
 	c2_lptr_t *rounded_corners_blacklist;
-	/// Rounded corner rules. A linked list of conditions.
-	c2_lptr_t *corner_radius_rules;
+	/// Rules to change window corners radius
+	c2_lptr_t* corners_rounding_rules;
+
+	// === Animations ===
+	/// Whether to do window animations
+	bool animations;
+	/// Which animation to run when opening a window
+	enum open_window_animation animation_for_open_window;
+	/// Which animation to run when opening a transient window
+	enum open_window_animation animation_for_transient_window;
+	/// Which animation to run when unmapping a window
+	enum open_window_animation animation_for_unmap_window;
+	/// Spring stiffness for animation
+	double animation_stiffness;
+	/// Window mass for animation
+	double animation_window_mass;
+	/// Animation dampening
+	double animation_dampening;
+	/// Whether to clamp animations
+	bool animation_clamping;
+	/// Rules to change window open animation
+	c2_lptr_t* animating_rules_open;
+	/// Rules to change window unmap animation
+	c2_lptr_t* animating_rules_unmap;
+	/// Animation blacklist. A linked list of conditions.
+	c2_lptr_t *animation_blacklist;
 
 	// === Focus related ===
 	/// Whether to try to detect WM windows and mark them as focused.
@@ -260,8 +340,6 @@ typedef struct options {
 	/// A list of conditions of windows to which transparent clipping
 	/// should not apply
 	c2_lptr_t *transparent_clipping_blacklist;
-
-	bool dithered_present;
 } options_t;
 
 extern const char *const BACKEND_STRS[NUM_BKEND + 1];
@@ -270,11 +348,18 @@ bool must_use parse_long(const char *, long *);
 bool must_use parse_int(const char *, int *);
 struct conv **must_use parse_blur_kern_lst(const char *, bool *hasneg, int *count);
 bool must_use parse_geometry(session_t *, const char *, region_t *);
-bool must_use parse_numeric_window_rule(c2_lptr_t **, const char *, long, long);
+bool must_use parse_rule_opacity(c2_lptr_t **, const char *);
+bool must_use parse_rule_corners(c2_lptr_t **res, const char *src); // Kirill
+bool must_use parse_rule_animation(c2_lptr_t **res, const char *src); // Kirill
+bool must_use parse_rule_shadow_color(c2_lptr_t **res, const char *src); // Kirill
+bool must_use parse_rule_shadow(c2_lptr_t **res, const char *src); // Kirill
+bool must_use parse_rule_blur_method(c2_lptr_t **res, const char *src); // Kirill
+bool must_use parse_rule_blur(c2_lptr_t **res, const char *src); // Kirill
 bool must_use parse_rule_window_shader(c2_lptr_t **, const char *, const char *);
 char *must_use locate_auxiliary_file(const char *scope, const char *path,
                                      const char *include_dir);
 enum blur_method must_use parse_blur_method(const char *src);
+enum open_window_animation must_use parse_open_window_animation(const char *src); // Kirill
 
 /**
  * Add a pattern to a condition linked list.

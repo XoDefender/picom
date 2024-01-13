@@ -22,11 +22,6 @@
 #include "backend/backend_common.h"
 #include "backend/gl/gl_common.h"
 
-void gl_prepare(backend_t *base, const region_t *reg attr_unused) {
-	auto gd = (struct gl_data *)base;
-	glBeginQuery(GL_TIME_ELAPSED, gd->frame_timing[gd->current_frame_timing]);
-}
-
 GLuint gl_create_shader(GLenum shader_type, const char *shader_str) {
 	log_trace("===\n%s\n===", shader_str);
 
@@ -309,9 +304,9 @@ static GLuint gl_average_texture_color(backend_t *base, struct backend_image *im
 	// Allocate buffers for render input
 	GLint coord[16] = {0};
 	GLuint indices[] = {0, 1, 2, 2, 3, 0};
-	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * 16, coord, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * 16, coord, GL_DYNAMIC_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(*indices) * 6, indices,
-	             GL_STREAM_DRAW);
+	             GL_STATIC_DRAW);
 
 	// Do actual recursive render to 1x1 texture
 	GLuint result_texture = _gl_average_texture_color(
@@ -390,10 +385,6 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	if (win_shader->uniform_tex >= 0) {
 		glUniform1i(win_shader->uniform_tex, 0);
 	}
-	if (win_shader->uniform_effective_size >= 0) {
-		glUniform2f(win_shader->uniform_effective_size, (float)img->ewidth,
-		            (float)img->eheight);
-	}
 	if (win_shader->uniform_dim >= 0) {
 		glUniform1f(win_shader->uniform_dim, (float)img->dim);
 	}
@@ -452,9 +443,9 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	glGenBuffers(2, bo);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
-	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * nrects * 16, coord, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * nrects * 16, coord, GL_STATIC_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(*indices) * nrects * 6,
-	             indices, GL_STREAM_DRAW);
+	             indices, GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(vert_coord_loc);
 	glEnableVertexAttribArray(vert_in_texcoord_loc);
@@ -486,6 +477,8 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	glUseProgram(0);
 
 	gl_check_err();
+
+	return;
 }
 
 /// Convert rectangles in X coordinates to OpenGL vertex and texture coordinates
@@ -554,7 +547,7 @@ void x_rect_to_coords(int nrects, const rect_t *rects, coord_t image_dst,
 // TODO(yshui) make use of reg_visible
 void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask,
                 coord_t mask_dst, const region_t *reg_tgt,
-                const region_t *reg_visible attr_unused) {
+                const region_t *reg_visible attr_unused, bool lerp) {
 	auto gd = (struct gl_data *)base;
 	struct backend_image *img = image_data;
 	auto inner = (struct gl_texture *)img->inner;
@@ -580,6 +573,15 @@ void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask
 	coord_t mask_offset = {.x = mask_dst.x - image_dst.x, .y = mask_dst.y - image_dst.y};
 	x_rect_to_coords(nrects, rects, image_dst, inner->height, inner->height,
 	                 gd->height, inner->y_inverted, coord, indices);
+
+	// Kirill
+	if (lerp) {
+		for (unsigned int i = 2; i < 16; i+=4) {
+			coord[i+0] = lerp_range(0, mask_offset.x, 0, inner->width, coord[i+0]);
+			coord[i+1] = lerp_range(0, mask_offset.y, 0, inner->height, coord[i+1]);
+		}
+	}
+
 	_gl_compose(base, img, gd->back_fbo, mask, mask_offset, coord, indices, nrects);
 
 	free(indices);
@@ -603,7 +605,6 @@ static bool gl_win_shader_from_stringv(const char **vshader_strv,
 	bind_uniform(ret, opacity);
 	bind_uniform(ret, invert_color);
 	bind_uniform(ret, tex);
-	bind_uniform(ret, effective_size);
 	bind_uniform(ret, dim);
 	bind_uniform(ret, brightness);
 	bind_uniform(ret, max_brightness);
@@ -635,7 +636,7 @@ void gl_resize(struct gl_data *gd, int width, int height) {
 	assert(viewport_dimensions[1] >= gd->height);
 
 	glBindTexture(GL_TEXTURE_2D, gd->back_texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, gd->back_format, width, height, 0, GL_BGR,
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_BGR,
 	             GL_UNSIGNED_BYTE, NULL);
 
 	gl_check_err();
@@ -808,10 +809,7 @@ uint64_t gl_get_shader_attributes(backend_t *backend_data attr_unused, void *sha
 }
 
 bool gl_init(struct gl_data *gd, session_t *ps) {
-	glGenQueries(2, gd->frame_timing);
-	gd->current_frame_timing = 0;
-
-	// Initialize GL data structure
+	// Initialize GLX data structure
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
 
@@ -884,16 +882,7 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	glUniformMatrix4fv(pml, 1, false, projection_matrix[0]);
 	glUseProgram(0);
 
-	gd->dithered_present = ps->o.dithered_present;
-	if (gd->dithered_present) {
-		gd->present_prog = gl_create_program_from_strv(
-		    (const char *[]){present_vertex_shader, NULL},
-		    (const char *[]){present_frag, dither_glsl, NULL});
-	} else {
-		gd->present_prog = gl_create_program_from_strv(
-		    (const char *[]){present_vertex_shader, NULL},
-		    (const char *[]){dummy_frag, NULL});
-	}
+	gd->present_prog = gl_create_program_from_str(present_vertex_shader, dummy_frag);
 	if (!gd->present_prog) {
 		log_error("Failed to create the present shader");
 		return false;
@@ -927,23 +916,14 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	glUniformMatrix4fv(pml, 1, false, projection_matrix[0]);
 	glUseProgram(0);
 
-	// Set up the size and format of the back texture
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->back_fbo);
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	const GLint *format = gd->dithered_present ? (const GLint[]){GL_RGB16, GL_RGBA16}
-	                                           : (const GLint[]){GL_RGB8, GL_RGBA8};
-	for (int i = 0; i < 2; i++) {
-		gd->back_format = format[i];
-		gl_resize(gd, ps->root_width, ps->root_height);
+	// Set up the size of the back texture
+	gl_resize(gd, ps->root_width, ps->root_height);
 
-		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-		                       GL_TEXTURE_2D, gd->back_texture, 0);
-		if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
-			log_info("Using back buffer format %#x", gd->back_format);
-			break;
-		}
-	}
-	if (!gl_check_fb_complete(GL_DRAW_FRAMEBUFFER)) {
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->back_fbo);
+	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+	                       gd->back_texture, 0);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	if (!gl_check_fb_complete(GL_FRAMEBUFFER)) {
 		return false;
 	}
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -956,7 +936,7 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	const char *vendor = (const char *)glGetString(GL_VENDOR);
 	log_debug("GL_VENDOR = %s", vendor);
 	if (strcmp(vendor, "NVIDIA Corporation") == 0) {
-		log_info("GL vendor is NVIDIA, enable xrender sync fence.");
+		log_info("GL vendor is NVIDIA, don't use glFinish");
 		gd->is_nvidia = true;
 	} else {
 		gd->is_nvidia = false;
@@ -978,9 +958,6 @@ void gl_deinit(struct gl_data *gd) {
 		gl_destroy_window_shader(&gd->base, gd->default_shader);
 		gd->default_shader = NULL;
 	}
-
-	glDeleteTextures(1, &gd->default_mask_texture);
-	glDeleteTextures(1, &gd->back_texture);
 
 	gl_check_err();
 }
@@ -1068,9 +1045,9 @@ static inline void gl_image_decouple(backend_t *base, struct backend_image *img)
 	glGenBuffers(2, bo);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
-	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * 16, coord, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * 16, coord, GL_STATIC_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(*indices) * 6, indices,
-	             GL_STREAM_DRAW);
+	             GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(vert_coord_loc);
 	glEnableVertexAttribArray(vert_in_texcoord_loc);
@@ -1168,31 +1145,8 @@ void gl_present(backend_t *base, const region_t *region) {
 	glDeleteBuffers(2, bo);
 	glDeleteVertexArrays(1, &vao);
 
-	glEndQuery(GL_TIME_ELAPSED);
-	gd->current_frame_timing ^= 1;
-
-	gl_check_err();
-
 	free(coord);
 	free(indices);
-}
-
-bool gl_last_render_time(backend_t *base, struct timespec *ts) {
-	auto gd = (struct gl_data *)base;
-	GLint available = 0;
-	glGetQueryObjectiv(gd->frame_timing[gd->current_frame_timing ^ 1],
-	                   GL_QUERY_RESULT_AVAILABLE, &available);
-	if (!available) {
-		return false;
-	}
-
-	GLuint64 time;
-	glGetQueryObjectui64v(gd->frame_timing[gd->current_frame_timing ^ 1],
-	                      GL_QUERY_RESULT, &time);
-	ts->tv_sec = (long)(time / 1000000000);
-	ts->tv_nsec = (long)(time % 1000000000);
-	gl_check_err();
-	return true;
 }
 
 bool gl_image_op(backend_t *base, enum image_operations op, void *image_data,
@@ -1334,7 +1288,7 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 		    1.0, gsctx->blur_context, NULL, (coord_t){0}, &reg_blur, NULL,
 		    source_texture,
 		    (geometry_t){.width = new_inner->width, .height = new_inner->height},
-		    fbo, gd->default_mask_texture, gd->dithered_present);
+		    fbo, gd->default_mask_texture);
 		pixman_region32_fini(&reg_blur);
 	}
 
@@ -1352,8 +1306,6 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 
 	glBindTexture(GL_TEXTURE_2D, tmp_texture);
 	glUseProgram(gd->shadow_shader.prog);
-	// The shadow color is converted to the premultiplied format to respect the
-	// globally set glBlendFunc and thus get the correct and expected result.
 	glUniform4f(gd->shadow_shader.uniform_color, (GLfloat)(color.red * color.alpha),
 	            (GLfloat)(color.green * color.alpha),
 	            (GLfloat)(color.blue * color.alpha), (GLfloat)color.alpha);
@@ -1374,9 +1326,9 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	glGenBuffers(2, bo);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
-	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * 8, coord, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * 8, coord, GL_STATIC_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(*indices) * 6, indices,
-	             GL_STREAM_DRAW);
+	             GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(vert_coord_loc);
 	glVertexAttribPointer(vert_coord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 2, NULL);

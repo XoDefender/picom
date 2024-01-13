@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) Yuxuan Shui <yshuiv7@gmail.com>
 #pragma once
+#include <stdbool.h>
+// Older version of glx.h defines function prototypes for these extensions...
+// Rename them to avoid conflicts
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include <stdbool.h>
 #include <xcb/render.h>
 #include <xcb/xcb.h>
 

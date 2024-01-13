@@ -11,6 +11,11 @@
 
 #include "uthash_extra.h"
 
+// FIXME shouldn't need this
+#ifdef CONFIG_OPENGL
+#include <GL/gl.h>
+#endif
+
 #include "c2.h"
 #include "compiler.h"
 #include "list.h"
@@ -26,12 +31,11 @@ typedef struct session session_t;
 typedef struct _glx_texture glx_texture_t;
 
 #define win_stack_foreach_managed(w, win_stack)                                          \
-	list_foreach(struct managed_win, w, win_stack,                                   \
-	             base.stack_neighbour) if ((w)->base.managed)
+	list_foreach(struct managed_win, w, win_stack, base.stack_neighbour) if (w->base.managed)
 
 #define win_stack_foreach_managed_safe(w, win_stack)                                     \
 	list_foreach_safe(struct managed_win, w, win_stack,                              \
-	                  base.stack_neighbour) if ((w)->base.managed)
+	                  base.stack_neighbour) if (w->base.managed)
 
 #ifdef CONFIG_OPENGL
 // FIXME this type should be in opengl.h
@@ -96,6 +100,24 @@ struct win_geometry {
 	uint16_t border_width;
 };
 
+// Kirill
+enum {
+    ANIM_UNMAP = 1,
+	ANIM_MAP = (1 << 1),
+};
+
+enum {
+	SHADOW_VAL_RADIUS = 1,
+	SHADOW_VAL_COLOR,
+};
+
+struct shadow_geometry
+{
+	int offset_x;
+	int offset_y;
+	int radius;
+};
+
 struct managed_win {
 	struct win base;
 	/// backend data attached to this window. Only available when
@@ -119,8 +141,8 @@ struct managed_win {
 	struct win_geometry g;
 	/// Updated geometry received in events
 	struct win_geometry pending_g;
-	/// X RandR monitor this window is on.
-	int randr_monitor;
+	/// Xinerama screen this window is on.
+	int xinerama_scr;
 	/// Window visual pict format
 	const xcb_render_pictforminfo_t *pictfmt;
 	/// Client window visual pict format
@@ -219,8 +241,34 @@ struct managed_win {
 	double opacity_set;
 
 	/// Radius of rounded window corners
+	uint32_t rounding_prop;
+	bool has_rounding_prop;
+	bool has_rounding_rule;
+	int rounding_rule;
 	int corner_radius;
 	float border_col[4];
+
+	// The window state (MAP/UNMAP)
+	uint32_t dwm_mask;
+
+	/// Current position and destination, for animation
+	double animation_center_x,      animation_center_y; // animation progress coordinates
+	double animation_dest_center_x, animation_dest_center_y; // current mouse position the animation straves to
+	double animation_w,      animation_h;
+	double animation_dest_w, animation_dest_h;
+	/// Spring animation velocity
+	double animation_velocity_x, animation_velocity_y;
+	double animation_velocity_w, animation_velocity_h;
+	/// Track animation progress; goes from 0 to 1
+	double animation_progress;
+	/// Inverse of the window distance at the start of animation, for
+	/// tracking animation progress
+	double animation_inv_og_distance;
+	enum open_window_animation animating_rule_open, animating_rule_unmap;
+	bool has_animating_rule_open, has_animating_rule_unmap;
+	int animating_map_prop, animating_unmap_prop;
+	bool has_animating_map_prop, has_animating_unmap_prop;
+	bool has_animating_blacklist_prop, is_animating_blacklist;
 
 	// Fading-related members
 	/// Override value of window fade state. Set by D-Bus method calls.
@@ -254,11 +302,42 @@ struct managed_win {
 	int shadow_height;
 	/// Picture to render shadow. Affected by window size.
 	paint_t shadow_paint;
-	/// The value of _COMPTON_SHADOW attribute of the window. Below 0 for
+	/// /// The value of _COMPTON_SHADOW or _KDE_WM_WINDOW_SHADOW attribute of the window. Below 0 for
 	/// none.
 	long long prop_shadow;
+	bool has_prop_shadow;
 	/// Do not paint shadow over this window.
 	bool clip_shadow_above;
+
+	struct color shadow_color_rule;
+	bool has_shadow_color_rule;
+	struct color shadow_color_prop;
+	bool has_shadow_color_prop;
+
+	struct color shadow_color;
+
+	int shadow_opacity_rule;
+	bool has_shadow_opacity_rule;
+	int shadow_opacity_prop;
+	bool has_shadow_opacity_prop;
+
+	int shadow_radius_rule;
+	bool has_shadow_radius_rule;
+	int shadow_radius_prop;
+	bool has_shadow_radius_prop;
+
+	int shadow_offset_x_rule;
+	bool has_shadow_offset_x_rule;
+	int shadow_offset_x_prop;
+	bool has_shadow_offset_x_prop;
+
+	int shadow_offset_y_rule;
+	bool has_shadow_offset_y_rule;
+	int shadow_offset_y_prop;
+	bool has_shadow_offset_y_prop;
+
+	struct backend_shadow_context* shadow_context;
+	xcb_render_picture_t shadow_picture;
 
 	// Dim-related members
 	/// Whether the window is to be dimmed.
@@ -273,6 +352,32 @@ struct managed_win {
 	/// Whether to blur window background.
 	bool blur_background;
 
+	/// How to blur window background
+	int blur_size_prop;
+	bool has_blur_size_prop;
+	int blur_size_rule;
+	bool has_blur_size_rule;
+
+	int blur_strength_prop;
+	bool has_blur_strength_prop;
+	int blur_strength_rule;
+	bool has_blur_strength_rule;
+
+	int blur_deviation_prop;
+	bool has_blur_deviation_prop;
+	int blur_deviation_rule;
+	bool has_blur_deviation_rule;
+
+	int blur_presence_prop;
+	bool has_blur_presence_prop;
+
+	int blur_method_prop;
+	bool has_blur_method_prop;
+	int blur_method_rule;
+	bool has_blur_method_rule;
+
+	void* blur_context;
+
 	/// The custom window shader to use when rendering.
 	struct shader_info *fg_shader;
 
@@ -284,6 +389,9 @@ struct managed_win {
 #endif
 };
 
+/// Determine if a window should animate
+bool attr_pure win_should_animate(session_t *ps, const struct managed_win *w);
+
 /// Process pending updates/images flags on a window. Has to be called in X critical
 /// section
 void win_process_update_flags(session_t *ps, struct managed_win *w);
@@ -292,6 +400,12 @@ bool win_bind_mask(struct backend_base *b, struct managed_win *w);
 /// Bind a shadow to the window, with color `c` and shadow kernel `kernel`
 bool win_bind_shadow(struct backend_base *b, struct managed_win *w, struct color c,
                      struct backend_shadow_context *kernel);
+
+// Kirill: get specific data to apply to window
+struct backend_shadow_context* win_get_shadow_context(session_t *ps, struct managed_win *w);
+xcb_render_picture_t win_get_shadow_picture(session_t *ps, struct managed_win *w);
+struct color win_get_shadow_color(session_t *ps, struct managed_win *w);
+double win_get_shadow_opacity(session_t *ps, struct managed_win *w) ;
 
 /// Start the unmap of a window. We cannot unmap immediately since we might need to fade
 /// the window out.
@@ -341,9 +455,7 @@ void win_recheck_client(session_t *ps, struct managed_win *w);
  */
 double attr_pure win_calc_opacity_target(session_t *ps, const struct managed_win *w);
 bool attr_pure win_should_dim(session_t *ps, const struct managed_win *w);
-
-void win_update_monitor(struct x_monitors *monitors, struct managed_win *mw);
-
+void win_update_screen(int nscreens, region_t *screens, struct managed_win *w);
 /**
  * Retrieve the bounding shape of a window.
  */
@@ -430,6 +542,7 @@ struct managed_win *find_managed_window_or_parent(session_t *ps, xcb_window_t wi
  * It's not using w->border_size for performance measures.
  */
 bool attr_pure win_is_fullscreen(const session_t *ps, const struct managed_win *w);
+bool attr_pure win_is_maximized(const session_t *ps, const struct managed_win *w);
 
 /**
  * Check if a window is focused, without using any focus rules or forced focus settings

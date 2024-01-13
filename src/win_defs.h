@@ -94,9 +94,12 @@ enum win_flags {
 	WIN_FLAGS_POSITION_STALE = 512,
 	/// need better name for this, is set when some aspects of the window changed
 	WIN_FLAGS_FACTOR_CHANGED = 1024,
+
+	// if the pair is set - need to skip the animation to target position
+	WIN_FLAGS_ANIMATION_BLACKLIST_OUT = 2048,
+	WIN_FLAGS_ANIMATION_BLACKLIST_IN = 4096,
 };
 
-static const uint64_t WIN_FLAGS_IMAGES_STALE =
-    WIN_FLAGS_PIXMAP_STALE | WIN_FLAGS_SHADOW_STALE;
+static const uint64_t WIN_FLAGS_IMAGES_STALE = WIN_FLAGS_PIXMAP_STALE | WIN_FLAGS_SHADOW_STALE;
 
 #define WIN_FLAGS_IMAGES_NONE (WIN_FLAGS_PIXMAP_NONE | WIN_FLAGS_SHADOW_NONE)

@@ -46,7 +46,7 @@ static const struct picom_option picom_options[] = {
     {"fade-delta"                  , required_argument, 'D', NULL          , "The time between steps in a fade in milliseconds. (default 10)"},
     {"menu-opacity"                , required_argument, 'm', NULL          , "The opacity for menus. (default 1.0)"},
     {"shadow"                      , no_argument      , 'c', NULL          , "Enabled client-side shadows on windows."},
-    {"clear-shadow"                , no_argument      , 'z', NULL          , "Don't draw shadow behind the window."},
+    {"clear-shadow"                , no_argument      , 'z', NULL          , "Don't dreaw shadow behind the window."},
     {"fading"                      , no_argument      , 'f', NULL          , "Fade windows in/out when opening/closing and when opacity changes, "
                                                                              "unless --no-fading-openclose is used."},
     {"inactive-opacity"            , required_argument, 'i', NULL          , "Opacity of inactive windows. (0.1 - 1.0)"},
@@ -72,9 +72,6 @@ static const struct picom_option picom_options[] = {
                                                                              "managers not passing _NET_WM_WINDOW_OPACITY of client windows to frame"},
     {"refresh-rate"                , required_argument, 269, NULL          , NULL},
     {"vsync"                       , optional_argument, 270, NULL          , "Enable VSync"},
-    {"crop-shadow-to-monitor"      , no_argument      , 271, NULL          , "Crop shadow of a window fully on a particular monitor to that monitor. "
-                                                                             "This is currently implemented using the X RandR extension"},
-    {"xinerama-shadow-crop"        , no_argument      , 272, NULL          , NULL},
     {"sw-opti"                     , no_argument      , 274, NULL          , NULL},
     {"vsync-aggressive"            , no_argument      , 275, NULL          , NULL},
     {"use-ewmh-active-win"         , no_argument      , 276, NULL          , "Use _NET_WM_ACTIVE_WINDOW on the root window to determine which window is "
@@ -122,6 +119,7 @@ static const struct picom_option picom_options[] = {
     {"opacity-rule"                , required_argument, 304, "OPACITY:COND", "Specify a list of opacity rules, see man page for more details"},
     {"shadow-exclude-reg"          , required_argument, 305, NULL          , NULL},
     {"paint-exclude"               , required_argument, 306, NULL          , NULL},
+    {"xinerama-shadow-crop"        , no_argument      , 307, NULL          , "Crop shadow of a window fully on a particular Xinerama screen to the screen."},
     {"unredir-if-possible-exclude" , required_argument, 308, "COND"        , "Conditions of windows that shouldn't be considered full-screen for "
                                                                              "unredirecting screen."},
     {"unredir-if-possible-delay"   , required_argument, 309, NULL,           "Delay before unredirecting the window, in milliseconds. Defaults to 0."},
@@ -161,7 +159,6 @@ static const struct picom_option picom_options[] = {
     {"corner-radius"               , required_argument, 333, NULL          , "Sets the radius of rounded window corners. When > 0, the compositor will "
                                                                              "round the corners of windows. (defaults to 0)."},
     {"rounded-corners-exclude"     , required_argument, 334, "COND"        , "Exclude conditions for rounded corners."},
-    {"corner-radius-rules"         , required_argument, 340, "RADIUS:COND" , "Window rules for specific rounded corner radii."},
     {"clip-shadow-above"           , required_argument, 335, NULL          , "Specify a list of conditions of windows to not paint a shadow over, such "
                                                                              "as a dock window."},
     {"window-shader-fg"            , required_argument, 336, "PATH"        , "Specify GLSL fragment shader path for rendering window contents. Does not"
@@ -171,12 +168,6 @@ static const struct picom_option picom_options[] = {
                                                                              "similar to --opacity-rule. SHADER_PATH can be \"default\", in which case "
                                                                              "the default shader will be used. Does not work when --legacy-backends is "
                                                                              "enabled. See man page for more details"},
-    // 338 is transparent-clipping-exclude
-    {"dithered-present"            , no_argument      , 339, NULL          , "Use higher precision during rendering, and apply dither when presenting the "
-                                                                             "rendered screen. Reduces banding artifacts, but might cause performance "
-                                                                             "degradation. Only works with OpenGL."},
-    // 340 is corner-radius-rules
-    {"no-frame-pacing"             , no_argument      , 341, NULL          , "Disable frame pacing. This might increase the latency."},
     {"legacy-backends"             , no_argument      , 733, NULL          , "Use deprecated version of the backends."},
     {"monitor-repaint"             , no_argument      , 800, NULL          , "Highlight the updated area of the screen. For debugging."},
     {"diagnostics"                 , no_argument      , 801, NULL          , "Print diagnostic information"},
@@ -184,6 +175,25 @@ static const struct picom_option picom_options[] = {
                                                                              "you want to attach a debugger to picom"},
     {"no-ewmh-fullscreen"          , no_argument      , 803, NULL          , "Do not use EWMH to detect fullscreen windows. Reverts to checking if a "
                                                                              "window is fullscreen based only on its size and coordinates."},
+	{"corners-rounding-rule"       , required_argument, 804, "RADIUS:COND" , "Specify a list of corners rounding rules"}, // Kirill
+	{"animations"                  , no_argument       , 805, NULL          , "Enable/disable animations."}, // Kirill
+    {"animation-stiffness"         , required_argument, 806, NULL          , "Animation speed in current tag (float)."}, // Kirill
+    {"animation-dampening"         , required_argument, 807, NULL          , "Animation dampening ratio (spring dampening as an example)."}, // Kirill
+    {"animation-window-mass"       , required_argument, 808, NULL          , "Animation window mass (lower mass makes animations bumpy)."}, // Kirill
+    {"animation-clamping"          , no_argument      , 809, NULL          , "Enable/disable animation clamping. Disabling increases performance"}, // Kirill
+    {"animation-for-open-window"   , required_argument, 810, NULL          , "Set animation for opening window (Check sample.conf for options)."}, // Kirill
+    {"animation-for-transient-window", required_argument, 811, NULL        , "Set animation for transient (child) windows."}, // Kirill
+	{"animating-rule-open"           , required_argument, 812, "ANIMATION:COND", "Specify a list of animating rules."}, // Kirill
+	{"animating-rule-unmap"          , required_argument, 813, "ANIMATION:COND", "Specify a list of animating rules."}, // Kirill
+	{"shadow-color-rule"           , required_argument, 815, "COLOR:COND", "Specify a list of shadow color rules."}, // Kirill
+	{"shadow-radius-rule"          , required_argument, 816, "RADIUS:COND", "Specify a list of shadow radius rules."}, // Kirill
+	{"shadow-opacity-rule"         , required_argument, 817, "OPACITY:COND", "Specify a list of shadow opacity rules."}, // Kirill
+	{"shadow-offset-x-rule"        , required_argument, 818, "OFFSET:COND", "Specify a list of shadow offset rules."}, // Kirill
+	{"shadow-offset-y-rule"        , required_argument, 819, "OFFSET:COND", "Specify a list of shadow offset rules."}, // Kirill
+	{"blur-method-rule"            , required_argument, 820, "METHOD:COND", "Specify a list of blur method rules."}, // Kirill
+	{"blur-size-rule"              , required_argument, 821, "SIZE:COND", "Specify a list of blur size rules."}, // Kirill
+	{"blur-deviation-rule"         , required_argument, 822, "DEVIATION:COND", "Specify a list of blur deviation rules."}, // Kirill
+	{"blur-strength-rule"          , required_argument, 823, "STRENGTH:COND", "Specify a list of blur strength rules."}, // Kirill
 };
 // clang-format on
 
@@ -490,8 +500,8 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		P_CASEBOOL(267, detect_rounded_corners);
 		P_CASEBOOL(268, detect_client_opacity);
 		case 269:
-			log_warn("--refresh-rate has been deprecated, please remove it "
-			         "from your command line options");
+			log_warn("--refresh-rate has been deprecated, please remove it from"
+			         "your command line options");
 			break;
 		case 270:
 			if (optarg) {
@@ -504,12 +514,6 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 				opt->vsync = true;
 			}
 			break;
-		P_CASEBOOL(271, crop_shadow_to_monitor);
-		case 272:
-			opt->crop_shadow_to_monitor = true;
-			log_warn("--xinerama-shadow-crop is deprecated. Use "
-			         "--crop-shadow-to-monitor instead.");
-			break;
 		case 274:
 			log_warn("--sw-opti has been deprecated, please remove it from the "
 			         "command line options");
@@ -517,7 +521,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		case 275:
 			// --vsync-aggressive
 			log_error("--vsync-aggressive has been removed, please remove it"
-			          " from the command line options");
+			         " from the command line options");
 			failed = true;
 			break;
 		P_CASEBOOL(276, use_ewmh_active_win);
@@ -561,9 +565,8 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		case 290:
 			// --backend
 			opt->backend = parse_backend(optarg);
-			if (opt->backend >= NUM_BKEND) {
+			if (opt->backend >= NUM_BKEND)
 				exit(1);
-			}
 			break;
 		P_CASEBOOL(291, glx_no_stencil);
 		P_CASEINT(293, benchmark);
@@ -623,9 +626,8 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			break;
 		case 304:
 			// --opacity-rule
-			if (!parse_numeric_window_rule(&opt->opacity_rules, optarg, 0, 100)) {
+			if (!parse_rule_opacity(&opt->opacity_rules, optarg))
 				exit(1);
-			}
 			break;
 		case 305:
 			// --shadow-exclude-reg
@@ -638,6 +640,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			// --paint-exclude
 			condlst_add(&opt->paint_blacklist, optarg);
 			break;
+		P_CASEBOOL(307, xinerama_shadow_crop);
 		case 308:
 			// --unredir-if-possible-exclude
 			condlst_add(&opt->unredir_if_possible_blacklist, optarg);
@@ -728,21 +731,10 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			// --rounded-corners-exclude
 			condlst_add(&opt->rounded_corners_blacklist, optarg);
 			break;
-		case 340:
-			// --corner-radius-rules
-			if (!parse_numeric_window_rule(&opt->corner_radius_rules, optarg, 0, INT_MAX)) {
-				exit(1);
-			}
-			break;
 		case 335:
 			// --clip-shadow-above
 			condlst_add(&opt->shadow_clip_list, optarg);
 			break;
-		case 339:
-			// --dithered-present
-			opt->dithered_present = true;
-			break;
-		P_CASEBOOL(341, no_frame_pacing);
 		P_CASEBOOL(733, legacy_backends);
 		P_CASEBOOL(800, monitor_repaint);
 		case 801:
@@ -750,6 +742,117 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			break;
 		P_CASEBOOL(802, debug_mode);
 		P_CASEBOOL(803, no_ewmh_fullscreen);
+		P_CASEBOOL(805, animations);
+		case 804: // Kirill
+			// --corners-rounding-rule
+			if (!parse_rule_corners(&opt->corners_rounding_rules, optarg))
+				exit(1);
+			break;
+		case 806:
+			// --animation-stiffness
+			opt->animation_stiffness = atof(optarg);
+			break;
+		case 807:
+			// --animation-dampening
+			opt->animation_dampening = atof(optarg);
+			break;
+		case 808:
+			// --animation-window-masss
+			opt->animation_window_mass = atof(optarg);
+			break;
+		case 809:
+			// --animation-clamping
+			opt->animation_clamping = false;
+			break;
+		case 810: {
+			// --animation-for-open-window
+			enum open_window_animation animation = parse_open_window_animation(optarg);
+			if (animation >= OPEN_WINDOW_ANIMATION_INVALID) {
+				log_warn("Invalid open-window animation %s, ignoring.", optarg);
+			} else {
+				opt->animation_for_open_window = animation;
+			}
+			break;
+		}
+		case 811: {
+			// --animation-for-transient-window
+			enum open_window_animation animation = parse_open_window_animation(optarg);
+			if (animation >= OPEN_WINDOW_ANIMATION_INVALID) {
+				log_warn("Invalid transient-window animation %s, ignoring.", optarg);
+			} else {
+				opt->animation_for_transient_window = animation;
+			}
+			break;
+		}
+		case 812: // Kirill
+			// --animating-rule-open
+			if (!parse_rule_animation(&opt->animating_rules_open, optarg))
+				exit(1);
+			break;
+		case 813: // Kirill
+			// --animating-rule-unmap
+			if (!parse_rule_animation(&opt->animating_rules_unmap, optarg))
+				exit(1);
+			break;
+		case 814: {
+			// --animation-exclude
+			condlst_add(&opt->animation_blacklist, optarg);
+			break;
+		}
+		case 815: {
+			// --shadow-color-rule
+			if (!parse_rule_shadow_color(&opt->shadow_color_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 816: {
+			// --shadow-radius-rule
+			if (!parse_rule_shadow(&opt->shadow_radius_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 817: {
+			// --shadow-opacity-rule
+			if (!parse_rule_shadow(&opt->shadow_opacity_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 818: {
+			// --shadow-offset-x-rule
+			if (!parse_rule_shadow(&opt->shadow_offset_x_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 819: {
+			// --shadow-offset-y-rule
+			if (!parse_rule_shadow(&opt->shadow_offset_y_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 820: {
+			// --blur-method-rule
+			if (!parse_rule_blur_method(&opt->blur_method_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 821: {
+			// --blur-size-rule
+			if (!parse_rule_blur(&opt->blur_size_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 822: {
+			// --blur-deviation-rule
+			if (!parse_rule_blur(&opt->blur_deviation_rules, optarg))
+				exit(1);
+			break;
+		}
+		case 823: {
+			// --blur-strength-rule
+			if (!parse_rule_blur(&opt->blur_strength_rules, optarg))
+				exit(1);
+			break;
+		}
 		default: usage(argv[0], 1); break;
 #undef P_CASEBOOL
 		}
@@ -806,13 +909,14 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 	}
 
 	if (opt->window_shader_fg || opt->window_shader_fg_rules) {
-		if (opt->backend == BKEND_XRENDER || opt->legacy_backends) {
-			log_warn(opt->backend == BKEND_XRENDER
-			             ? "Shader interface is not supported by the xrender "
-			               "backend."
-			             : "The new shader interface is not supported by the "
-			               "legacy glx backend. You may want to use "
-			               "--glx-fshader-win instead.");
+		if (opt->legacy_backends || opt->backend != BKEND_GLX) {
+			log_warn("The new window shader interface does not work with the "
+			         "legacy glx backend.%s",
+			         (opt->backend == BKEND_GLX) ? " You may want to use "
+			                                       "\"--glx-fshader-win\" "
+			                                       "instead on the legacy "
+			                                       "glx backend."
+			                                     : "");
 			opt->window_shader_fg = NULL;
 			c2_list_free(&opt->window_shader_fg_rules, free);
 		}
@@ -827,16 +931,18 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 	opt->inactive_dim = normalize_d(opt->inactive_dim);
 	opt->frame_opacity = normalize_d(opt->frame_opacity);
 	opt->shadow_opacity = normalize_d(opt->shadow_opacity);
+
 	opt->max_brightness = normalize_d(opt->max_brightness);
 	if (opt->max_brightness < 1.0) {
-		if (opt->backend == BKEND_XRENDER || opt->legacy_backends) {
-			log_warn("--max-brightness is not supported by the %s backend. "
-			         "Falling back to 1.0.",
-			         opt->backend == BKEND_XRENDER ? "xrender" : "legacy glx");
-			opt->max_brightness = 1.0;
-		} else if (opt->use_damage) {
+		if (opt->use_damage) {
 			log_warn("--max-brightness requires --no-use-damage. Falling "
-			         "back to 1.0.");
+			         "back to 1.0");
+			opt->max_brightness = 1.0;
+		}
+
+		if (opt->legacy_backends || opt->backend != BKEND_GLX) {
+			log_warn("--max-brightness requires the new glx "
+			         "backend. Falling back to 1.0");
 			opt->max_brightness = 1.0;
 		}
 	}
@@ -845,6 +951,8 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 	if (opt->blur_background_frame && opt->blur_method == BLUR_METHOD_NONE) {
 		opt->blur_method = BLUR_METHOD_KERNEL;
 	}
+
+	condlst_add(&opt->shadow_blacklist, "name = 'XOSD'"); //alex: hardcode it
 
 	// Apply default wintype options that are dependent on global options
 	set_default_winopts(opt, winopt_mask, shadow_enable, fading_enable,

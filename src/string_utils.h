@@ -24,9 +24,8 @@ static inline int uitostr(unsigned int n, char *buf) {
 		ret++;
 	}
 
-	if (ret == 0) {
+	if (ret == 0)
 		ret = 1;
-	}
 
 	int pos = ret;
 	while (pos--) {
@@ -37,22 +36,18 @@ static inline int uitostr(unsigned int n, char *buf) {
 }
 
 static inline const char *skip_space_const(const char *src) {
-	if (!src) {
+	if (!src)
 		return NULL;
-	}
-	while (*src && isspace((unsigned char)*src)) {
+	while (*src && isspace((unsigned char)*src))
 		src++;
-	}
 	return src;
 }
 
 static inline char *skip_space_mut(char *src) {
-	if (!src) {
+	if (!src)
 		return NULL;
-	}
-	while (*src && isspace((unsigned char)*src)) {
+	while (*src && isspace((unsigned char)*src))
 		src++;
-	}
 	return src;
 }
 

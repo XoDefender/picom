@@ -14,6 +14,7 @@
 #include <xcb/render.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_renderutil.h>
+#include <xcb/xinerama.h>
 
 #include "atom.h"
 #include "backend/backend.h"
@@ -66,6 +67,79 @@ static int win_update_name(session_t *ps, struct managed_win *w);
  */
 static void win_update_opacity_prop(session_t *ps, struct managed_win *w);
 static void win_update_opacity_target(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * Reread corners rounding property of a window.
+ */
+static void win_update_rounding_prop(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * Set corners rounding for a window.
+ */
+static void win_determine_rounded_corners(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * Reread animating property of a window.
+ */
+static void win_update_animating_prop(session_t *ps, struct managed_win *w, xcb_atom_t atom, bool *has_prop, int *prop);
+
+/**
+ * Kirill
+ * Reread shadow color property of a window.
+ */
+static void win_update_shadow_color_prop(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * Reread shadow property of a window.
+ */
+void win_update_shadow_prop(session_t *ps, struct managed_win *w, xcb_atom_t atom, bool *has_prop, int *prop);
+
+/**
+ * Kirill
+ * Update shadow functions + get data functions
+ */
+static bool win_has_any_shadow_value(session_t *ps, struct managed_win *w, uint32_t shadow_val_type);
+void win_update_shadow_geometry(session_t *ps, struct managed_win *w);
+void win_mark_shadow_for_update(session_t *ps, struct managed_win *w);
+bool win_should_change_shadow_state(session_t *ps, struct managed_win *w, bool focused);
+void win_determine_shadow_color(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * If the window has custom blur values, create a window blur context.
+ */
+static void win_determine_blur_context(session_t *ps, struct managed_win *w);
+static bool win_need_update_blur_context(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * If the window has custom shadow values, create a window shadow context.
+ */
+static void win_determine_shadow_context(session_t *ps, struct managed_win *w);
+static bool win_need_update_shadow_context(session_t *ps, struct managed_win *w);
+
+// backend_common.h
+xcb_render_picture_t solid_picture(xcb_connection_t *c, xcb_drawable_t d, bool argb,
+                                   double a, double r, double g, double b);
+/**
+ * Kirill
+ * If the window has a custom shadow color, create a window shadow picture (--legacy-backends).
+ */
+static void win_determine_shadow_picture(session_t *ps, struct managed_win *w);
+static bool win_need_update_shadow_picture(session_t *ps, struct managed_win *w);
+
+/**
+ * Kirill
+ * Reread blur property of a window.
+ */
+static void win_update_blur_prop(session_t *ps, struct managed_win *w, xcb_atom_t atom,
+                                 bool *has_prop, int *prop);
+static bool win_has_any_blur_value(struct managed_win *w);
+
 /**
  * Retrieve frame extents from a window.
  */
@@ -324,7 +398,7 @@ static inline bool win_bind_pixmap(struct backend_base *b, struct managed_win *w
 	assert(!w->win_image);
 	auto pixmap = x_new_id(b->c);
 	auto e = xcb_request_check(
-	    b->c->c, xcb_composite_name_window_pixmap_checked(b->c->c, w->base.id, pixmap));
+	    b->c, xcb_composite_name_window_pixmap_checked(b->c, w->base.id, pixmap));
 	if (e) {
 		log_error("Failed to get named pixmap for window %#010x(%s)", w->base.id,
 		          w->name);
@@ -368,11 +442,7 @@ bool win_bind_shadow(struct backend_base *b, struct managed_win *w, struct color
 	    b->ops->shadow_from_mask == NULL) {
 		w->shadow_image = b->ops->render_shadow(b, w->widthb, w->heightb, sctx, c);
 	} else {
-		if (!w->mask_image) {
-			// It's possible we already allocated a mask because of background
-			// blur
-			win_bind_mask(b, w);
-		}
+		win_bind_mask(b, w);
 		w->shadow_image = b->ops->shadow_from_mask(b, w->mask_image, sctx, c);
 	}
 	if (!w->shadow_image) {
@@ -429,6 +499,33 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 		win_update_opacity_target(ps, w);
 	}
 
+	// Kirill - update a window corner raduis in reply to _FLY_WM_WINDOW_CORNER_RADIUS
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_WINDOW_CORNER_RADIUS)) {
+		win_update_rounding_prop(ps, w);
+		assert(w->state != WSTATE_DESTROYING);
+		win_determine_rounded_corners(ps, w);
+		win_update_bounding_shape(ps, w);
+		add_damage_from_win(ps, w);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_WINDOW_ANIMATION_BLACKLIST)) {
+		win_update_animating_prop(ps, w, ps->atoms->a_FLY_WM_WINDOW_ANIMATION_BLACKLIST, &w->has_animating_blacklist_prop, NULL);
+		win_set_flags(w, WIN_FLAGS_POSITION_STALE);
+
+		if(w->has_animating_blacklist_prop)
+			win_set_flags(w, WIN_FLAGS_ANIMATION_BLACKLIST_IN);
+		else if(win_check_flags_all(w, WIN_FLAGS_ANIMATION_BLACKLIST_IN))
+			win_set_flags(w, WIN_FLAGS_ANIMATION_BLACKLIST_OUT);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_WINDOW_MAP_ANIMATION)) {
+		win_update_animating_prop(ps, w, ps->atoms->a_FLY_WM_WINDOW_MAP_ANIMATION, &w->has_animating_map_prop, &w->animating_map_prop);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_WINDOW_UNMAP_ANIMATION)) {
+		win_update_animating_prop(ps, w, ps->atoms->a_FLY_WM_WINDOW_UNMAP_ANIMATION, &w->has_animating_unmap_prop, &w->animating_unmap_prop);
+	}
+
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_NET_FRAME_EXTENTS)) {
 		win_update_frame_extents(ps, w, w->client_win);
 		add_damage_from_win(ps, w);
@@ -457,12 +554,248 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 		win_update_prop_shadow(ps, w);
 	}
 
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_KDE_WM_WINDOW_SHADOW)) {
+		win_update_prop_shadow(ps, w);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_COLOR)) {
+		win_update_shadow_color_prop(ps, w);
+		win_mark_shadow_for_update(ps, w);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_OPACITY)) {
+		win_update_shadow_prop(ps, w, ps->atoms->a_FLY_WM_SHADOW_OPACITY, &w->has_shadow_opacity_prop, &w->shadow_opacity_prop);
+		win_mark_shadow_for_update(ps, w);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_RADIUS)) {
+		win_update_shadow_prop(ps, w, ps->atoms->a_FLY_WM_SHADOW_RADIUS, &w->has_shadow_radius_prop, &w->shadow_radius_prop);
+		win_set_flags(w, WIN_FLAGS_SIZE_STALE);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_OFFSET_X)) {
+		win_update_shadow_prop(ps, w, ps->atoms->a_FLY_WM_SHADOW_OFFSET_X, &w->has_shadow_offset_x_prop, &w->shadow_offset_x_prop);
+		win_set_flags(w, WIN_FLAGS_SIZE_STALE);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_OFFSET_Y)) {
+		win_update_shadow_prop(ps, w, ps->atoms->a_FLY_WM_SHADOW_OFFSET_Y, &w->has_shadow_offset_y_prop, &w->shadow_offset_y_prop);
+		win_set_flags(w, WIN_FLAGS_SIZE_STALE);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_KDE_NET_WM_BLUR_BEHIND_REGION)) {
+		win_update_blur_prop(ps, w, ps->atoms->a_KDE_NET_WM_BLUR_BEHIND_REGION,
+		                     &w->has_blur_presence_prop, &w->blur_presence_prop);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_SIZE)) {
+		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_SIZE,
+		                     &w->has_blur_size_prop, &w->blur_size_prop);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_STRENGTH)) {
+		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_STRENGTH,
+		                     &w->has_blur_strength_prop, &w->blur_strength_prop);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_DEVIATION)) {
+		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_DEVIATION,
+		                     &w->has_blur_deviation_prop, &w->blur_deviation_prop);
+	}
+
+	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_METHOD)) {
+		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_METHOD,
+		                     &w->has_blur_method_prop, &w->blur_method_prop);
+	}
+
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->aWM_CLIENT_LEADER) ||
 	    win_fetch_and_unset_property_stale(w, ps->atoms->aWM_TRANSIENT_FOR)) {
 		win_update_leader(ps, w);
 	}
 
 	win_clear_all_properties_stale(w);
+}
+
+/**
+ * Kirill
+ * Determine if a window should animate.
+ */
+bool win_should_animate(session_t *ps, const struct managed_win *w) {
+	if (!ps->o.wintype_option[w->window_type].animation || !ps->o.animations ||
+		w->has_animating_blacklist_prop || w->is_animating_blacklist) return false;
+
+	return true;
+}
+
+static void win_determine_animation(session_t *ps, struct managed_win *w,
+								   uint32_t event, enum open_window_animation *animation)
+{
+	if(event & ANIM_UNMAP)
+	{
+		if(w->has_animating_unmap_prop)
+		{
+			*animation = w->animating_unmap_prop;
+			return;
+		}
+
+		if (w->has_animating_rule_unmap)
+		{
+			*animation = w->animating_rule_unmap;
+			return;
+		}
+
+		*animation = ps->o.animation_for_unmap_window;
+	}
+	else if(event & ANIM_MAP)
+	{
+		if(w->has_animating_map_prop)
+		{
+			*animation = w->animating_map_prop;
+			return;
+		}
+
+		if (w->has_animating_rule_open)
+		{
+			*animation = w->animating_rule_open;
+			return;
+		}
+
+		*animation = ps->o.animation_for_open_window;
+	}
+
+	if (ps->o.wintype_option[w->window_type].animation != OPEN_WINDOW_ANIMATION_INVALID)
+	{
+		*animation = ps->o.wintype_option[w->window_type].animation;
+		return;
+	}
+
+	if (w->window_type != WINTYPE_TOOLTIP && wid_has_prop(ps, w->client_win, ps->atoms->aWM_TRANSIENT_FOR))
+	{
+		*animation = ps->o.animation_for_transient_window;
+		return;
+	}
+}
+
+static void win_apply_animation(session_t *ps, struct managed_win *w,
+								double *anim_x, double *anim_y, double *anim_w, double *anim_h,
+								int32_t *randr_mon_center_x, int32_t *randr_mon_center_y,
+								enum open_window_animation *animation)
+{
+	double angle;
+	switch (*animation)
+	{
+	case OPEN_WINDOW_ANIMATION_NONE:
+		w->animation_center_x = w->pending_g.x + w->pending_g.width * 0.5;
+		w->animation_center_y = w->pending_g.y + w->pending_g.height * 0.5;
+		w->animation_w = w->pending_g.width;
+		w->animation_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_FLYIN:
+		angle = 2 * M_PI * ((double)rand() / RAND_MAX);
+		const double radius = sqrt(ps->root_width * ps->root_width + ps->root_height * ps->root_height);
+
+		*anim_x = *randr_mon_center_x + radius * cos(angle);
+		*anim_y = *randr_mon_center_y + radius * sin(angle);
+		*anim_w = 0;
+		*anim_h = 0;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_UP:
+		*anim_x = w->pending_g.x + w->pending_g.width * 0.5;
+		*anim_y = w->pending_g.y + w->pending_g.height;
+		*anim_w = w->pending_g.width;
+		*anim_h = 0;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_DOWN:
+		*anim_x = w->pending_g.x + w->pending_g.width * 0.5;
+		*anim_y = w->pending_g.y;
+		*anim_w = w->pending_g.width;
+		*anim_h = 0;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_LEFT:
+		*anim_x = w->pending_g.x + w->pending_g.width;
+		*anim_y = w->pending_g.y + w->pending_g.height * 0.5;
+		*anim_w = 0;
+		*anim_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_RIGHT:
+		*anim_x = w->pending_g.x;
+		*anim_y = w->pending_g.y + w->pending_g.height * 0.5;
+		*anim_w = 0;
+		*anim_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_IN:
+		*anim_x = w->pending_g.x + w->pending_g.width * 0.5;
+		*anim_y = w->pending_g.y + w->pending_g.height * 0.5;
+		*anim_w = w->pending_g.width;
+		*anim_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_IN_CENTER:
+		*anim_x = *randr_mon_center_x;
+		*anim_y = w->g.y + w->pending_g.height * 0.5;
+		*anim_w = w->pending_g.width;
+		*anim_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_OUT:
+		w->animation_dest_center_x = w->pending_g.x + w->pending_g.width * 0.5;
+		w->animation_dest_center_y = w->pending_g.y;
+		w->animation_dest_w = w->pending_g.width;
+		w->animation_dest_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_SLIDE_OUT_CENTER:
+		w->animation_dest_center_x = *randr_mon_center_x;
+		w->animation_dest_center_y = w->pending_g.y;
+		w->animation_dest_w = w->pending_g.width;
+		w->animation_dest_h = w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_ZOOM:
+		*anim_x = w->pending_g.x + w->pending_g.width * 0.5;
+		*anim_y = w->pending_g.y + w->pending_g.height * 0.5;
+		*anim_w = 0;
+		*anim_h = 0;
+		break;
+	case OPEN_WINDOW_ANIMATION_MINIMIZE:
+		*anim_x = *randr_mon_center_x;
+		*anim_y = *randr_mon_center_y;
+		*anim_w = 0;
+		*anim_h = 0;
+		break;
+	case OPEN_WINDOW_ANIMATION_SQUEEZE:
+		*anim_x = w->pending_g.x + w->pending_g.width * 0.5;
+		*anim_y = w->pending_g.y + w->pending_g.height * 0.5;
+		*anim_w = w->pending_g.width;
+		*anim_h = 0;
+		break;
+	case OPEN_WINDOW_ANIMATION_SQUEEZE_BOTTOM:
+		w->animation_center_x = w->pending_g.x + w->pending_g.width * 0.5;
+		w->animation_center_y = w->pending_g.y + w->pending_g.height;
+		w->animation_w = w->pending_g.width;
+		*anim_h = 0;
+		*anim_y = w->pending_g.y + w->pending_g.height;
+		break;
+	case OPEN_WINDOW_ANIMATION_INVALID: assert(false); break;
+	}
+}
+
+static void init_animation(session_t *ps, struct managed_win *w) {
+	static int32_t randr_mon_center_x, randr_mon_center_y;
+	randr_mon_center_x = ps->root_width / 2, randr_mon_center_y = ps->root_height / 2;
+
+	static double *anim_x, *anim_y, *anim_w, *anim_h;
+
+	anim_x = &w->animation_center_x, anim_y = &w->animation_center_y;
+	anim_w = &w->animation_w, anim_h = &w->animation_h;
+
+	if(w->dwm_mask & ANIM_UNMAP)
+	{
+		anim_x = &w->animation_dest_center_x, anim_y = &w->animation_dest_center_y;
+		anim_w = &w->animation_dest_w, anim_h = &w->animation_dest_h;
+	}
+
+	enum open_window_animation animation;
+	win_determine_animation(ps, w, w->dwm_mask, &animation);
+	win_apply_animation(ps, w, anim_x, anim_y, anim_w, anim_h,
+						&randr_mon_center_x, &randr_mon_center_y,
+						&animation);
 }
 
 /// Handle non-image flags. This phase might set IMAGES_STALE flags
@@ -490,6 +823,15 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 		win_clear_flags(w, WIN_FLAGS_CLIENT_STALE);
 	}
 
+	if (win_check_flags_all(w, WIN_FLAGS_PROPERTY_STALE)) {
+		win_update_properties(ps, w);
+		win_clear_flags(w, WIN_FLAGS_PROPERTY_STALE);
+	}
+
+	if(win_need_update_blur_context(ps, w))   win_determine_blur_context(ps, w);
+	if(win_need_update_shadow_context(ps, w)) win_determine_shadow_context(ps, w);
+	if(win_need_update_shadow_picture(ps, w)) win_determine_shadow_picture(ps, w);
+
 	bool damaged = false;
 	if (win_check_flags_any(w, WIN_FLAGS_SIZE_STALE | WIN_FLAGS_POSITION_STALE)) {
 		if (was_visible) {
@@ -506,7 +848,50 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 		}
 
 		// Update window geometry
-		w->g = w->pending_g;
+		if (win_should_animate(ps, w)) {
+			win_update_bounding_shape(ps, w);
+
+			if (!was_visible || w->dwm_mask) {
+				init_animation(ps, w);
+				w->animation_dest_center_x =
+				    w->pending_g.x + w->pending_g.width * 0.5;
+				w->animation_dest_center_y =
+				    w->pending_g.y + w->pending_g.height * 0.5;
+				w->animation_dest_w = w->pending_g.width;
+				w->animation_dest_h = w->pending_g.height;
+				w->g.x = (int16_t)round(w->animation_center_x -
+				                        w->animation_w * 0.5);
+				w->g.y = (int16_t)round(w->animation_center_y -
+				                        w->animation_h * 0.5);
+				w->g.width = (uint16_t)round(w->animation_w);
+				w->g.height = (uint16_t)round(w->animation_h);
+
+			} else {
+				w->animation_dest_center_x =
+				    w->pending_g.x + w->pending_g.width * 0.5;
+				w->animation_dest_center_y =
+				    w->pending_g.y + w->pending_g.height * 0.5;
+				w->animation_dest_w = w->pending_g.width;
+				w->animation_dest_h = w->pending_g.height;
+			}
+
+			CLEAR_MASK(w->dwm_mask)
+			w->g.border_width = w->pending_g.border_width;
+			double x_dist = w->animation_dest_center_x - w->animation_center_x;
+			double y_dist = w->animation_dest_center_y - w->animation_center_y;
+			double w_dist = w->animation_dest_w - w->animation_w;
+			double h_dist = w->animation_dest_h - w->animation_h;
+			w->animation_inv_og_distance =
+			    1.0 / sqrt(x_dist * x_dist + y_dist * y_dist +
+			               w_dist * w_dist + h_dist * h_dist);
+
+			if (isinf(w->animation_inv_og_distance))
+				w->animation_inv_og_distance = 0;
+
+			w->animation_progress = 0.0;
+		} else {
+			w->g = w->pending_g;
+		}
 
 		if (win_check_flags_all(w, WIN_FLAGS_SIZE_STALE)) {
 			win_on_win_size_change(ps, w);
@@ -520,12 +905,7 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 			win_clear_flags(w, WIN_FLAGS_POSITION_STALE);
 		}
 
-		win_update_monitor(&ps->monitors, w);
-	}
-
-	if (win_check_flags_all(w, WIN_FLAGS_PROPERTY_STALE)) {
-		win_update_properties(ps, w);
-		win_clear_flags(w, WIN_FLAGS_PROPERTY_STALE);
+		win_update_screen(ps->xinerama_nscrs, ps->xinerama_scr_regs, w);
 	}
 
 	// Factor change flags could be set by previous stages, so must be handled
@@ -540,6 +920,76 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 	if (damaged) {
 		add_damage_from_win(ps, w);
 	}
+}
+
+void win_mark_shadow_for_update(session_t *ps, struct managed_win *w)
+{
+	add_damage_from_win(ps, w);
+	win_set_flags(w, WIN_FLAGS_SHADOW_STALE);
+	win_release_mask(ps->backend_data, w);
+	free_paint(ps, &w->shadow_paint);
+}
+
+bool win_should_change_shadow_state(session_t *ps, struct managed_win *w, bool focused)
+{
+	if(!w) return false;
+	if(!ps->o.shadow_active || !ps->o.wintype_option[w->window_type].shadow_active) return false;
+
+	if(focused && w->focused) return true;
+	else if(!focused && !w->focused) return true;
+
+	return false;
+}
+
+struct backend_shadow_context* win_get_shadow_context(session_t *ps, struct managed_win *w)
+{
+	if (w->shadow_context) return w->shadow_context;
+	else if(win_should_change_shadow_state(ps, w, true)) return ps->shadow_context_active;
+	else return ps->shadow_context;
+}
+xcb_render_picture_t win_get_shadow_picture(session_t *ps, struct managed_win *w)
+{
+	if (w->shadow_picture) return w->shadow_picture;
+	else if(win_should_change_shadow_state(ps, w, true)) return ps->cshadow_picture_active;
+	else return ps->cshadow_picture;
+}
+double win_get_shadow_opacity(session_t *ps, struct managed_win *w)
+{
+	if (w->has_shadow_opacity_prop)
+		return normalize_d((double)w->shadow_opacity_prop / 100);
+	else if (w->has_shadow_opacity_rule)
+		return normalize_d((double)w->shadow_opacity_rule / 100);
+	else if (ps->o.wintype_option[w->window_type].shadow_opacity != INT_MAX)
+		return normalize_d((double)ps->o.wintype_option[w->window_type].shadow_opacity / 100);
+	else if (win_should_change_shadow_state(ps, w, true))
+		return ps->o.shadow_opacity_active;
+	else
+		return ps->o.shadow_opacity;
+}
+struct color win_get_shadow_color(session_t *ps, struct managed_win *w)
+{
+	win_determine_shadow_color(ps, w);
+
+	struct color shadow_color;
+
+	if (!safe_isnan(w->shadow_color.red) &&
+		!safe_isnan(w->shadow_color.green) &&
+		!safe_isnan(w->shadow_color.blue))
+			shadow_color = w->shadow_color;
+
+	else if (win_should_change_shadow_state(ps, w, true))
+		shadow_color = (struct color){.red = ps->o.shadow_red_active
+									  , .green = ps->o.shadow_green_active
+									  , .blue = ps->o.shadow_blue_actives};
+
+	else
+		shadow_color = (struct color){.red = ps->o.shadow_red
+									  , .green = ps->o.shadow_green
+									  , .blue = ps->o.shadow_blue};
+
+	shadow_color.alpha = win_get_shadow_opacity(ps, w);
+
+	return shadow_color;
 }
 
 void win_process_image_flags(session_t *ps, struct managed_win *w) {
@@ -579,12 +1029,9 @@ void win_process_image_flags(session_t *ps, struct managed_win *w) {
 				win_release_shadow(ps->backend_data, w);
 			}
 			if (w->shadow) {
-				win_bind_shadow(ps->backend_data, w,
-				                (struct color){.red = ps->o.shadow_red,
-				                               .green = ps->o.shadow_green,
-				                               .blue = ps->o.shadow_blue,
-				                               .alpha = ps->o.shadow_opacity},
-				                ps->shadow_context);
+				struct color clr = win_get_shadow_color(ps, w);
+				struct backend_shadow_context *shadow_context = win_get_shadow_context(ps, w);
+				win_bind_shadow(ps->backend_data, w, clr, shadow_context);
 			}
 		}
 
@@ -703,7 +1150,7 @@ static inline bool win_bounding_shaped(const session_t *ps, xcb_window_t wid) {
 		Bool bounding_shaped;
 
 		reply = xcb_shape_query_extents_reply(
-		    ps->c.c, xcb_shape_query_extents(ps->c.c, wid), NULL);
+		    ps->c, xcb_shape_query_extents(ps->c, wid), NULL);
 		bounding_shaped = reply && reply->bounding_shaped;
 		free(reply);
 
@@ -715,7 +1162,7 @@ static inline bool win_bounding_shaped(const session_t *ps, xcb_window_t wid) {
 
 static wintype_t wid_get_prop_wintype(session_t *ps, xcb_window_t wid) {
 	winprop_t prop =
-	    x_get_prop(&ps->c, wid, ps->atoms->a_NET_WM_WINDOW_TYPE, 32L, XCB_ATOM_ATOM, 32);
+	    x_get_prop(ps->c, wid, ps->atoms->a_NET_WM_WINDOW_TYPE, 32L, XCB_ATOM_ATOM, 32);
 
 	for (unsigned i = 0; i < prop.nitems; ++i) {
 		for (wintype_t j = 1; j < NUM_WINTYPES; ++j) {
@@ -736,7 +1183,9 @@ wid_get_opacity_prop(session_t *ps, xcb_window_t wid, opacity_t def, opacity_t *
 	bool ret = false;
 	*out = def;
 
-	winprop_t prop = x_get_prop(&ps->c, wid, ps->atoms->a_NET_WM_WINDOW_OPACITY, 1L,
+	if (!ps->o.enable_transparency) return false; //alex
+
+	winprop_t prop = x_get_prop(ps->c, wid, ps->atoms->a_NET_WM_WINDOW_OPACITY, 1L,
 	                            XCB_ATOM_CARDINAL, 32);
 
 	if (prop.nitems) {
@@ -745,6 +1194,124 @@ wid_get_opacity_prop(session_t *ps, xcb_window_t wid, opacity_t def, opacity_t *
 	}
 
 	free_winprop(&prop);
+
+	return ret;
+}
+
+// Kirill
+static bool
+wid_get_rounding_prop(session_t *ps, xcb_window_t wid, uint32_t def, uint32_t *out) {
+	bool ret = false;
+	*out = def;
+
+	winprop_t prop = x_get_prop(ps->c, wid, ps->atoms->a_FLY_WM_WINDOW_CORNER_RADIUS, 1L,
+	                            XCB_ATOM_CARDINAL, 32);
+
+	if (prop.nitems) {
+		*out = *prop.c32;
+		ret = true;
+	}
+
+	free_winprop(&prop);
+
+	return ret;
+}
+
+static bool
+wid_get_animating_prop(session_t *ps, xcb_window_t wid, int *out, uint32_t prop) {
+	bool ret = false;
+	char **strlst = NULL;
+	int nstr = 0;
+
+	if(prop == ps->atoms->a_FLY_WM_WINDOW_ANIMATION_BLACKLIST)
+	{
+		winprop_t prop_val = x_get_prop(ps->c, wid, ps->atoms->a_FLY_WM_WINDOW_ANIMATION_BLACKLIST, 1L, XCB_ATOM_CARDINAL, 32);
+		if (prop_val.nitems) ret = true;
+		free_winprop(&prop_val);
+	}
+	else if(wid_get_text_prop(ps, wid, prop, &strlst, &nstr) && nstr > 0)
+	{
+		*out = parse_open_window_animation(strlst[0]);
+		ret = true;
+		free(strlst);
+	}
+
+	return ret;
+}
+
+static bool
+wid_get_shadow_color_prop(session_t *ps, xcb_window_t wid, struct color *out) {
+	bool ret = false;
+	struct color w_color;
+	char **strlst = NULL;
+	int nstr = 0;
+
+	winprop_t prop = x_get_prop(ps->c, wid, ps->atoms->a_FLY_WM_SHADOW_COLOR, 1L, XCB_ATOM_CARDINAL, 32);
+
+	if(prop.nitems)
+	{
+		w_color = int_hex_to_rgb((int)*prop.c32);
+		ret = true;
+	}
+	else if(wid_get_text_prop(ps, wid, ps->atoms->a_FLY_WM_SHADOW_COLOR, &strlst, &nstr) && nstr > 0)
+	{
+		w_color = hex_to_rgb(strlst[0]);
+		w_color.red = normalize_d(w_color.red);
+		w_color.green = normalize_d(w_color.green);
+		w_color.blue = normalize_d(w_color.blue);
+		ret = true;
+
+		free(strlst);
+	}
+
+	out->red = w_color.red;
+	out->green = w_color.green;
+	out->blue = w_color.blue;
+
+	free_winprop(&prop);
+
+	return ret;
+}
+
+static bool wid_get_shadow_prop(session_t *ps, xcb_window_t wid, int *out, xcb_atom_t atom) {
+	bool ret = false;
+	winprop_t prop = x_get_prop(ps->c, wid, atom, 1L, XCB_ATOM_CARDINAL, 32);
+	if (prop.nitems) {
+		*out = (int)*prop.c32;
+		if(atom == ps->atoms->a_FLY_WM_SHADOW_RADIUS && *out < 0) *out = 0;
+		ret = true;
+	}
+
+	free_winprop(&prop);
+
+	return ret;
+}
+
+static bool
+wid_get_blur_prop(session_t *ps, xcb_window_t wid, int *out, xcb_atom_t atom) {
+	bool ret = false;
+
+	if (atom == ps->atoms->a_FLY_WM_BLUR_METHOD) {
+		char **strlst = NULL;
+		int nstr = 0;
+		if (wid_get_text_prop(ps, wid, atom, &strlst, &nstr) && nstr > 0) {
+			*out = parse_blur_method(strlst[0]);
+			ret = true;
+			free(strlst);
+		}
+	} else {
+		winprop_t prop = x_get_prop(ps->c, wid, atom, 1L, XCB_ATOM_CARDINAL, 32);
+
+		if (prop.nitems) {
+			*out = (int)*prop.c32;
+			ret = true;
+		}
+
+		free_winprop(&prop);
+	}
+
+	if (atom == ps->atoms->a_FLY_WM_BLUR_DEVIATION && *out == 0)
+		*out = 1;
 
 	return ret;
 }
@@ -828,12 +1395,11 @@ double win_calc_opacity_target(session_t *ps, const struct managed_win *w) {
 	} else {
 		// Respect active_opacity only when the window is physically
 		// focused
-		if (win_is_focused_raw(ps, w)) {
+		if (win_is_focused_raw(ps, w))
 			opacity = ps->o.active_opacity;
-		} else if (!w->focused) {
+		else if (!w->focused)
 			// Respect inactive_opacity in some cases
 			opacity = ps->o.inactive_opacity;
-		}
 	}
 
 	// respect inactive override
@@ -855,8 +1421,9 @@ bool win_should_dim(session_t *ps, const struct managed_win *w) {
 
 	if (ps->o.inactive_dim > 0 && !(w->focused)) {
 		return true;
+	} else {
+		return false;
 	}
-	return false;
 }
 
 /**
@@ -883,16 +1450,21 @@ bool win_should_fade(session_t *ps, const struct managed_win *w) {
 }
 
 /**
- * Reread _COMPTON_SHADOW property from a window.
+ * Reread _COMPTON_SHADOW or _KDE_WM_WINDOW_SHADOW property from a window.
  *
  * The property must be set on the outermost window, usually the WM frame.
  */
 void win_update_prop_shadow_raw(session_t *ps, struct managed_win *w) {
-	winprop_t prop = x_get_prop(&ps->c, w->base.id, ps->atoms->a_COMPTON_SHADOW, 1,
-	                            XCB_ATOM_CARDINAL, 32);
+	winprop_t prop = x_get_prop(ps->c, w->base.id, ps->atoms->a_KDE_WM_WINDOW_SHADOW, 1,
+ 	                            XCB_ATOM_CARDINAL, 32);
 
 	if (!prop.nitems) {
-		w->prop_shadow = -1;
+		winprop_t prop1 = x_get_prop(ps->c, w->base.id, ps->atoms->a_COMPTON_SHADOW, 1,
+		                            XCB_ATOM_CARDINAL, 32);
+		if (!prop1.nitems) w->prop_shadow = -1;
+		else               w->prop_shadow = *prop1.c32;
+
+		free_winprop(&prop1);
 	} else {
 		w->prop_shadow = *prop.c32;
 	}
@@ -956,7 +1528,7 @@ static void win_set_shadow(session_t *ps, struct managed_win *w, bool shadow_new
 		// By setting WIN_FLAGS_SHADOW_STALE, we ask win_process_flags to
 		// re-create or release the shaodw in based on whether w->shadow
 		// is set.
-		win_set_flags(w, WIN_FLAGS_SHADOW_STALE);
+		win_mark_shadow_for_update(ps, w);
 
 		// Only set pending_updates if we are redirected. Otherwise change
 		// of a shadow won't have influence on whether we should redirect.
@@ -1086,9 +1658,8 @@ void win_set_shadow_force(session_t *ps, struct managed_win *w, switch_t val) {
 
 static void
 win_set_blur_background(session_t *ps, struct managed_win *w, bool blur_background_new) {
-	if (w->blur_background == blur_background_new) {
+	if (w->blur_background == blur_background_new)
 		return;
-	}
 
 	w->blur_background = blur_background_new;
 
@@ -1109,6 +1680,162 @@ win_set_fg_shader(session_t *ps, struct managed_win *w, struct shader_info *shad
 	// A different shader might change how the window is drawn, these changes
 	// should be rare however, so this should be fine.
 	add_damage_from_win(ps, w);
+}
+
+/**
+ * Determine the blur method according to the specified window blur values.
+ */
+static enum
+blur_method win_determine_blur_method(session_t *ps, struct managed_win *w) {
+	if (w->has_blur_presence_prop) {
+		if (w->has_blur_method_prop && w->blur_method_prop < 5 && w->blur_method_prop != 1)
+			return w->blur_method_prop;
+		else
+			return BLUR_METHOD_GAUSSIAN;
+	} else {
+		if (w->has_blur_method_prop)
+			return w->blur_method_prop;
+		else if (w->has_blur_method_rule)
+			return w->blur_method_rule;
+		else return ps->o.blur_method;
+	}
+
+	return BLUR_METHOD_INVALID;
+}
+
+/**
+ * Determine values for the particular blur method.
+ */
+static void
+win_determine_blur_values(session_t *ps, struct managed_win *w, void *args,
+                                      enum blur_method method) {
+	switch (method) {
+	case BLUR_METHOD_BOX: {
+		struct box_blur_args *bargs = (struct box_blur_args *)args;
+		if (w->has_blur_size_prop)
+			bargs->size = (int)w->blur_size_prop;
+		else if (w->has_blur_size_rule)
+			bargs->size = (int)w->blur_size_rule;
+		else
+			bargs->size = ps->o.blur_radius;
+
+		break;
+	}
+	case BLUR_METHOD_GAUSSIAN: {
+		struct gaussian_blur_args *gargs = (struct gaussian_blur_args *)args;
+		if (w->has_blur_size_prop)
+			gargs->size = (int)w->blur_size_prop;
+		else if (w->has_blur_size_rule)
+			gargs->size = (int)w->blur_size_rule;
+		else
+			gargs->size = ps->o.blur_radius;
+
+		if (w->has_blur_deviation_prop)
+			gargs->deviation = w->blur_deviation_prop;
+		else if (w->has_blur_deviation_rule)
+			gargs->deviation = w->blur_deviation_rule;
+		else
+			gargs->deviation = ps->o.blur_deviation;
+
+		break;
+	}
+	case BLUR_METHOD_DUAL_KAWASE: {
+		struct dual_kawase_blur_args *dkargs = (struct dual_kawase_blur_args *)args;
+		if (w->has_blur_size_prop)
+			dkargs->size = w->blur_size_prop;
+		else if (w->has_blur_size_rule)
+			dkargs->size = w->blur_size_rule;
+		else
+			dkargs->size = ps->o.blur_radius;
+
+		if (w->has_blur_strength_prop)
+			dkargs->strength = w->blur_strength_prop;
+		else if (w->has_blur_strength_rule)
+			dkargs->strength = w->blur_strength_rule;
+		else
+			dkargs->strength = ps->o.blur_strength;
+
+		if (dkargs->strength <= 0 && dkargs->size > 500) {
+			log_warn("Blur radius >500 not supported by dual_kawase method, "
+			         "capping to 500.");
+			dkargs->size = 500;
+		}
+		if (dkargs->strength > 20) {
+			log_warn("Blur strength >20 not supported by dual_kawase method, "
+			         "capping to 20.");
+			dkargs->strength = 20;
+		}
+
+		break;
+	}
+	default: break;
+	}
+}
+
+/**
+ * Does the window have any custom blur value
+ */
+static bool
+win_has_any_blur_value(struct managed_win *w)
+{
+	if(w->has_blur_deviation_prop || w->has_blur_deviation_rule ||
+	  w->has_blur_method_prop || w->has_blur_method_rule ||
+	  w->has_blur_presence_prop || w->has_blur_size_prop ||
+	  w->has_blur_size_rule || w->has_blur_strength_prop ||
+	  w->has_blur_strength_rule)
+		return true;
+
+	return false;
+}
+
+/**
+ * Determine if a window should have a custom blur context.
+ */
+static void win_determine_blur_context(session_t *ps, struct managed_win *w) {
+	void *args = NULL;
+	enum blur_method method = win_determine_blur_method(ps, w);
+	struct gaussian_blur_args gargs;
+	struct box_blur_args bargs;
+	struct dual_kawase_blur_args dkargs;
+
+	switch (method) {
+	case BLUR_METHOD_BOX: {
+		win_determine_blur_values(ps, w, &bargs, method);
+		args = (void *)&bargs;
+		break;
+	}
+	case BLUR_METHOD_GAUSSIAN: {
+		win_determine_blur_values(ps, w, &gargs, method);
+		args = (void *)&gargs;
+		break;
+	}
+	case BLUR_METHOD_DUAL_KAWASE: {
+		if (ps->o.legacy_backends) {
+			log_warn("Dual-kawase blur is not implemented by the legacy "
+			         "backends.");
+			return;
+		}
+		win_determine_blur_values(ps, w, &dkargs, method);
+		args = (void *)&dkargs;
+		break;
+	}
+	default:
+	{
+		w->blur_background = false;
+		return;
+	}
+	}
+
+	w->blur_context = ps->backend_data->ops->create_blur_context(ps->backend_data, method, args);
+}
+
+static bool win_need_update_blur_context(session_t *ps, struct managed_win *w)
+{
+	if (!ps->backend_data || w->blur_context) return false;
+	if (c2_match(ps, w, ps->o.blur_background_blacklist, NULL)) return false;
+	if (!win_has_any_blur_value(w)) return false;
+
+	return true;
 }
 
 /**
@@ -1135,6 +1862,14 @@ static void win_determine_blur_background(session_t *ps, struct managed_win *w) 
 	win_set_blur_background(ps, w, blur_background_new);
 }
 
+static void win_determine_corner_radius(session_t *ps, struct managed_win *w)
+{
+	if (w->has_rounding_prop) w->corner_radius = (int)w->rounding_prop;
+	else if (w->has_rounding_rule) w->corner_radius = w->rounding_rule;
+	else if (ps->o.wintype_option[w->window_type].corner_radius != INT_MAX) w->corner_radius = ps->o.wintype_option[w->window_type].corner_radius;
+	else w->corner_radius = ps->o.corner_radius;
+}
+
 /**
  * Determine if a window should have rounded corners.
  */
@@ -1144,29 +1879,82 @@ static void win_determine_rounded_corners(session_t *ps, struct managed_win *w) 
 		return;
 	}
 
-	void *radius_override = NULL;
-	if (c2_match(ps, w, ps->o.corner_radius_rules, &radius_override)) {
-		log_debug("Matched corner rule! %d", w->corner_radius);
-	}
-
-	// Don't round full screen windows & excluded windows,
-	// unless we find a corner override in corner_radius_rules
-	if (!radius_override && ((w && win_is_fullscreen(ps, w)) ||
-	                         c2_match(ps, w, ps->o.rounded_corners_blacklist, NULL))) {
+	// Don't round full screen windows & excluded windows
+	if ((w && (win_is_fullscreen(ps, w) || win_is_maximized(ps, w))) || //alex: no round corners for maximized
+	    c2_match(ps, w, ps->o.rounded_corners_blacklist, NULL)) {
 		w->corner_radius = 0;
 		log_debug("Not rounding corners for window %#010x", w->base.id);
 	} else {
-		if (radius_override) {
-			w->corner_radius = (int)(long)radius_override;
-		} else {
-			w->corner_radius = ps->o.corner_radius;
-		}
+		win_determine_corner_radius(ps, w);
 
-		log_debug("Rounding corners for window %#010x", w->base.id);
-		// Initialize the border color to an invalid value
-		w->border_col[0] = w->border_col[1] = w->border_col[2] =
-		    w->border_col[3] = -1.0F;
+		if(w->corner_radius)
+		{
+			log_debug("Rounding corners for window %#010x", w->base.id);
+			w->border_col[0] = w->border_col[1] = w->border_col[2] = w->border_col[3] = -1.0F;
+		}
 	}
+}
+
+/**
+ * Determine if a window should have a custom shadow context.
+ */
+static void win_determine_shadow_context(session_t *ps, struct managed_win *w) {
+	int radius = (w->has_shadow_radius_prop) ?
+				 w->shadow_radius_prop :
+				 (w->has_shadow_radius_rule) ?
+				 w->shadow_radius_rule :
+				 ps->o.wintype_option[w->window_type].shadow_radius;
+
+	if (ps->o.legacy_backends)
+	{
+		w->shadow_context = (void *)gaussian_kernel_autodetect_deviation(radius);
+		sum_kernel_preprocess((conv *)w->shadow_context);
+	}
+	else w->shadow_context = ps->backend_data->ops->create_shadow_context(ps->backend_data, radius);
+}
+
+/**
+ * Determine if a window should have a custom shadow color.
+ */
+void win_determine_shadow_color(session_t *ps, struct managed_win *w)
+{
+	if      (w->has_shadow_color_prop) w->shadow_color = w->shadow_color_prop;
+	else if (w->has_shadow_color_rule) w->shadow_color = w->shadow_color_rule;
+	else if (!safe_isnan(ps->o.wintype_option[w->window_type].shadow_color.red) &&
+			 !safe_isnan(ps->o.wintype_option[w->window_type].shadow_color.green) &&
+			 !safe_isnan(ps->o.wintype_option[w->window_type].shadow_color.blue)) w->shadow_color = ps->o.wintype_option[w->window_type].shadow_color;
+	else w->shadow_color = (struct color){.red = NAN
+									  , .green = NAN
+									  , .blue = NAN};
+}
+
+static bool win_need_update_shadow_context(session_t *ps, struct managed_win *w)
+{
+	if ((!ps->backend_data && !ps->o.legacy_backends)) return false;
+	if (w->shadow_context) return false;
+	if (c2_match(ps, w, ps->o.shadow_blacklist, NULL)) return false;
+	if (!win_has_any_shadow_value(ps, w, SHADOW_VAL_RADIUS)) return false;
+
+	return true;
+}
+
+/**
+ * Determine if a window should have a custom shadow picture.
+ */
+static void win_determine_shadow_picture(session_t *ps, struct managed_win *w)
+{
+	struct color clr = win_get_shadow_color(ps, w);
+	w->shadow_picture = solid_picture(ps->c, ps->root, true, 1, clr.red, clr.green, clr.blue);
+}
+
+static bool win_need_update_shadow_picture(session_t *ps, struct managed_win *w)
+{
+	if(!ps->o.legacy_backends) return false;
+	if (w->shadow_picture) return false;
+	if (c2_match(ps, w, ps->o.shadow_blacklist, NULL)) return false;
+	if (!win_has_any_shadow_value(ps, w, SHADOW_VAL_COLOR)) return false;
+
+	return true;
 }
 
 /**
@@ -1212,6 +2000,154 @@ void win_update_opacity_rule(session_t *ps, struct managed_win *w) {
 }
 
 /**
+ * Kirill
+ * Update corners radius according to corners rounding rules.
+ */
+void win_update_corners_rounding_rule(session_t *ps, struct managed_win *w) {
+	if (w->a.map_state != XCB_MAP_STATE_VIEWABLE) {
+		return;
+	}
+
+	void *val = NULL;
+	if (c2_match(ps, w, ps->o.corners_rounding_rules, &val))
+	{
+		w->rounding_rule = (int)(long)val;
+		w->has_rounding_rule = true;
+	}
+	else
+	{
+		w->rounding_rule = 0;
+		w->has_rounding_rule = false;
+	}
+}
+
+/**
+ * Kirill
+ * Update animation according to animating rules.
+ */
+void win_update_animating_rule(session_t *ps, struct managed_win *w) {
+	if (w->a.map_state != XCB_MAP_STATE_VIEWABLE) {
+		return;
+	}
+
+	void *val = NULL;
+	if (c2_match(ps, w, ps->o.animating_rules_open, &val)) {
+		w->animating_rule_open = (int)(long)val;
+		w->has_animating_rule_open = true;
+	} else {
+		w->animating_rule_open = 0;
+		w->has_animating_rule_open = false;
+	}
+
+	if (c2_match(ps, w, ps->o.animating_rules_unmap, &val)) {
+		w->animating_rule_unmap = (int)(long)val;
+		w->has_animating_rule_unmap = true;
+	} else {
+		w->animating_rule_unmap = 0;
+		w->has_animating_rule_unmap = false;
+	}
+
+	if (c2_match(ps, w, ps->o.animation_blacklist, NULL))
+		w->is_animating_blacklist = true;
+}
+
+/**
+ * Kirill
+ * Update shadow properties according to shadow rules.
+ */
+void win_update_shadow_rule(session_t *ps, struct managed_win *w) {
+	if (w->a.map_state != XCB_MAP_STATE_VIEWABLE) {
+		return;
+	}
+
+	int hex_color;
+	void *val = NULL;
+	if (c2_match(ps, w, ps->o.shadow_color_rules, &val)) {
+		hex_color = (int)(long)val;
+		w->shadow_color_rule = int_hex_to_rgb(hex_color);
+		w->has_shadow_color_rule = true;
+	} else {
+		w->has_shadow_color_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.shadow_opacity_rules, &val)) {
+		w->shadow_opacity_rule = (int)(long)val;
+		w->has_shadow_opacity_rule = true;
+	} else {
+		w->shadow_opacity_rule = 0;
+		w->has_shadow_opacity_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.shadow_radius_rules, &val)) {
+		int ival = (int)(long)val;
+		w->shadow_radius_rule = ival < 0 ? 0 : ival;
+		w->has_shadow_radius_rule = true;
+	} else {
+		w->shadow_radius_rule = 0;
+		w->has_shadow_radius_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.shadow_offset_x_rules, &val)) {
+		w->shadow_offset_x_rule = (int)(long)val;
+		w->has_shadow_offset_x_rule = true;
+	} else {
+		w->shadow_offset_x_rule = 0;
+		w->has_shadow_offset_x_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.shadow_offset_y_rules, &val)) {
+		w->shadow_offset_y_rule = (int)(long)val;
+		w->has_shadow_offset_y_rule = true;
+	} else {
+		w->shadow_offset_y_rule = 0;
+		w->has_shadow_offset_y_rule = false;
+	}
+}
+
+/**
+ * Kirill
+ * Update blur value according to blur rules.
+ */
+void win_update_blur_rule(session_t *ps, struct managed_win *w) {
+	if (w->a.map_state != XCB_MAP_STATE_VIEWABLE) {
+		return;
+	}
+
+	void *val = NULL;
+	if (c2_match(ps, w, ps->o.blur_method_rules, &val)) {
+		w->blur_method_rule = (int)(long)val;
+		w->has_blur_method_rule = true;
+	} else {
+		w->blur_method_rule = 0;
+		w->has_blur_method_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.blur_deviation_rules, &val)) {
+		w->blur_deviation_rule = (int)(long)val;
+		w->has_blur_deviation_rule = true;
+	} else {
+		w->blur_deviation_rule = 0;
+		w->has_blur_deviation_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.blur_size_rules, &val)) {
+		w->blur_size_rule = (int)(long)val;
+		w->has_blur_size_rule = true;
+	} else {
+		w->blur_size_rule = 0;
+		w->has_blur_size_rule = false;
+	}
+
+	if (c2_match(ps, w, ps->o.blur_strength_rules, &val)) {
+		w->blur_strength_rule = (int)(long)val;
+		w->has_blur_strength_rule = true;
+	} else {
+		w->blur_strength_rule = 0;
+		w->has_blur_strength_rule = false;
+	}
+}
+
+/**
  * Function to be called on window data changes.
  *
  * TODO(yshui) need better name
@@ -1222,11 +2158,17 @@ void win_on_factor_change(session_t *ps, struct managed_win *w) {
 	// focused state of the window
 	win_update_focused(ps, w);
 
+	win_update_shadow_rule(ps, w); // Kirill
 	win_determine_shadow(ps, w);
 	win_determine_clip_shadow_above(ps, w);
 	win_determine_invert_color(ps, w);
 	win_determine_blur_background(ps, w);
-	win_determine_rounded_corners(ps, w);
+
+	win_update_corners_rounding_rule(ps, w); // Kirill
+	win_determine_rounded_corners(ps, w); // Kirill
+	win_update_animating_rule(ps, w); // Kirill
+	win_update_blur_rule(ps, w); // Kirill
+
 	win_determine_fg_shader(ps, w);
 	w->mode = win_calc_mode(w);
 	log_debug("Window mode changed to %d", w->mode);
@@ -1249,23 +2191,54 @@ void win_on_factor_change(session_t *ps, struct managed_win *w) {
 	w->reg_ignore_valid = false;
 }
 
+struct shadow_geometry win_get_shadow_geometry(session_t *ps, struct managed_win *w)
+{
+	struct shadow_geometry geometry;
+
+	if (w->has_shadow_offset_x_prop) geometry.offset_x = w->shadow_offset_x_prop;
+	else if (w->has_shadow_offset_x_rule) geometry.offset_x = w->shadow_offset_x_rule;
+	else if (ps->o.wintype_option[w->window_type].shadow_offset_x != INT_MAX) geometry.offset_x = ps->o.wintype_option[w->window_type].shadow_offset_x;
+	else if (win_should_change_shadow_state(ps, w, true)) geometry.offset_x = ps->o.shadow_offset_x_active; // TODO:Kirill
+	else geometry.offset_x = ps->o.shadow_offset_x;
+
+	if (w->has_shadow_offset_y_prop) geometry.offset_y = w->shadow_offset_y_prop;
+	else if (w->has_shadow_offset_y_rule) geometry.offset_y = w->shadow_offset_y_rule;
+	else if (ps->o.wintype_option[w->window_type].shadow_offset_y != INT_MAX) geometry.offset_y = ps->o.wintype_option[w->window_type].shadow_offset_y;
+	else if (win_should_change_shadow_state(ps, w, true)) geometry.offset_y = ps->o.shadow_offset_y_active; // TODO:Kirill
+	else geometry.offset_y = ps->o.shadow_offset_y;
+
+	if (w->has_shadow_radius_prop) geometry.radius = w->shadow_radius_prop;
+	else if (w->has_shadow_radius_rule) geometry.radius = w->shadow_radius_rule;
+	else if (ps->o.wintype_option[w->window_type].shadow_radius != INT_MAX) geometry.radius = ps->o.wintype_option[w->window_type].shadow_radius;
+	else if (win_should_change_shadow_state(ps, w, true)) geometry.radius = ps->o.shadow_radius_active; // TODO:Kirill
+	else geometry.radius = ps->o.shadow_radius;
+
+	return geometry;
+}
+
+void win_update_shadow_geometry(session_t *ps, struct managed_win *w)
+{
+	struct shadow_geometry geometry = win_get_shadow_geometry(ps, w);
+
+	w->shadow_dx = geometry.offset_x;
+	w->shadow_dy = geometry.offset_y;
+	w->widthb = w->g.width + w->g.border_width * 2;
+	w->heightb = w->g.height + w->g.border_width * 2;
+	w->shadow_width = w->widthb + geometry.radius * 2;
+	w->shadow_height = w->heightb + geometry.radius * 2;
+}
+
 /**
  * Update cache data in struct _win that depends on window size.
  */
 void win_on_win_size_change(session_t *ps, struct managed_win *w) {
-	w->widthb = w->g.width + w->g.border_width * 2;
-	w->heightb = w->g.height + w->g.border_width * 2;
-	w->shadow_dx = ps->o.shadow_offset_x;
-	w->shadow_dy = ps->o.shadow_offset_y;
-	w->shadow_width = w->widthb + ps->o.shadow_radius * 2;
-	w->shadow_height = w->heightb + ps->o.shadow_radius * 2;
-
-	// We don't handle property updates of non-visible windows until they are
-	// mapped.
-	assert(w->state != WSTATE_UNMAPPED && w->state != WSTATE_DESTROYING &&
-	       w->state != WSTATE_UNMAPPING);
+	// Kirill - drops picom
+	// We don't handle property updates of non-visible windows until they are mapped.
+	// assert(w->state != WSTATE_UNMAPPED && w->state != WSTATE_DESTROYING &&
+	//        w->state != WSTATE_UNMAPPING);
 
 	// Invalidate the shadow we built
+	win_update_shadow_geometry(ps, w);
 	win_set_flags(w, WIN_FLAGS_IMAGES_STALE);
 	win_release_mask(ps->backend_data, w);
 	ps->pending_updates = true;
@@ -1286,11 +2259,10 @@ void win_update_wintype(session_t *ps, struct managed_win *w) {
 	// _NET_WM_WINDOW_TYPE_NORMAL, otherwise as _NET_WM_WINDOW_TYPE_DIALOG.
 	if (WINTYPE_UNKNOWN == w->window_type) {
 		if (w->a.override_redirect ||
-		    !wid_has_prop(ps, w->client_win, ps->atoms->aWM_TRANSIENT_FOR)) {
+		    !wid_has_prop(ps, w->client_win, ps->atoms->aWM_TRANSIENT_FOR))
 			w->window_type = WINTYPE_NORMAL;
-		} else {
+		else
 			w->window_type = WINTYPE_DIALOG;
-		}
 	}
 
 	if (w->window_type != wtype_old) {
@@ -1315,9 +2287,9 @@ void win_mark_client(session_t *ps, struct managed_win *w, xcb_window_t client) 
 	}
 
 	auto e = xcb_request_check(
-	    ps->c.c, xcb_change_window_attributes_checked(
-	                 ps->c.c, client, XCB_CW_EVENT_MASK,
-	                 (const uint32_t[]){determine_evmask(ps, client, WIN_EVMODE_CLIENT)}));
+	    ps->c, xcb_change_window_attributes(
+	               ps->c, client, XCB_CW_EVENT_MASK,
+	               (const uint32_t[]){determine_evmask(ps, client, WIN_EVMODE_CLIENT)}));
 	if (e) {
 		log_error("Failed to change event mask of window %#010x", client);
 		free(e);
@@ -1342,13 +2314,13 @@ void win_mark_client(session_t *ps, struct managed_win *w, xcb_window_t client) 
 	win_on_factor_change(ps, w);
 
 	auto r = xcb_get_window_attributes_reply(
-	    ps->c.c, xcb_get_window_attributes(ps->c.c, w->client_win), &e);
+	    ps->c, xcb_get_window_attributes(ps->c, w->client_win), &e);
 	if (!r) {
 		log_error_x_error(e, "Failed to get client window attributes");
 		return;
 	}
 
-	w->client_pictfmt = x_get_pictform_for_visual(&ps->c, r->visual);
+	w->client_pictfmt = x_get_pictform_for_visual(ps->c, r->visual);
 	free(r);
 }
 
@@ -1367,7 +2339,7 @@ void win_unmark_client(session_t *ps, struct managed_win *w) {
 
 	// Recheck event mask
 	xcb_change_window_attributes(
-	    ps->c.c, client, XCB_CW_EVENT_MASK,
+	    ps->c, client, XCB_CW_EVENT_MASK,
 	    (const uint32_t[]){determine_evmask(ps, client, WIN_EVMODE_UNKNOWN)});
 }
 
@@ -1380,7 +2352,7 @@ static xcb_window_t find_client_win(session_t *ps, xcb_window_t w) {
 	}
 
 	xcb_query_tree_reply_t *reply =
-	    xcb_query_tree_reply(ps->c.c, xcb_query_tree(ps->c.c, w), NULL);
+	    xcb_query_tree_reply(ps->c, xcb_query_tree(ps->c, w), NULL);
 	if (!reply) {
 		return 0;
 	}
@@ -1454,7 +2426,7 @@ void free_win_res(session_t *ps, struct managed_win *w) {
 
 	pixman_region32_fini(&w->bounding_shape);
 	// BadDamage may be thrown if the window is destroyed
-	set_ignore_cookie(&ps->c, xcb_damage_destroy(ps->c.c, w->damage));
+	set_ignore_cookie(ps, xcb_damage_destroy(ps->c, w->damage));
 	rc_region_unref(&w->reg_ignore);
 	free(w->name);
 	free(w->class_instance);
@@ -1503,11 +2475,12 @@ struct win *add_win_above(session_t *ps, xcb_window_t id, xcb_window_t below) {
 			return NULL;
 		}
 		return add_win_top(ps, id);
+	} else {
+		// we found something from the hash table, so if the stack is
+		// empty, we are in an inconsistent state.
+		assert(!list_is_empty(&ps->window_stack));
+		return add_win(ps, id, w->stack_neighbour.prev);
 	}
-	// we found something from the hash table, so if the stack is
-	// empty, we are in an inconsistent state.
-	assert(!list_is_empty(&ps->window_stack));
-	return add_win(ps, id, w->stack_neighbour.prev);
 }
 
 /// Query the Xorg for information about window `win`
@@ -1555,6 +2528,11 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    .shadow_height = 0,
 	    .damage = XCB_NONE,
 
+		.shadow_color.red = NAN,
+		.shadow_color.green = NAN,
+		.shadow_color.blue = NAN,
+		.shadow_color.alpha = NAN,
+
 	    // Not initialized until mapped, this variables
 	    // have no meaning or have no use until the window
 	    // is mapped
@@ -1565,7 +2543,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    .shadow = false,
 	    .clip_shadow_above = false,
 	    .fg_shader = NULL,
-	    .randr_monitor = -1,
+	    .xinerama_scr = -1,
 	    .mode = WMODE_TRANS,
 	    .ever_damaged = false,
 	    .client_win = XCB_NONE,
@@ -1599,7 +2577,22 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    .paint = PAINT_INIT,
 	    .shadow_paint = PAINT_INIT,
 
+		// Kirill
 	    .corner_radius = 0,
+		.has_rounding_prop = false,
+		.has_rounding_rule = false,
+		.rounding_prop = 0,
+		.rounding_rule = 0,
+
+	    .animation_progress = 0.0,
+		.animating_map_prop = 0,
+		.animating_unmap_prop = 0,
+		.animating_rule_open = 0,
+		.animating_rule_unmap = 0,
+		.has_animating_map_prop = false,
+		.has_animating_unmap_prop = false,
+		.has_animating_rule_open = false,
+		.has_animating_rule_unmap = false,
 	};
 
 	assert(!w->destroyed);
@@ -1621,10 +2614,9 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	}
 
 	log_debug("Managing window %#010x", w->id);
-	xcb_get_window_attributes_cookie_t acookie =
-	    xcb_get_window_attributes(ps->c.c, w->id);
+	xcb_get_window_attributes_cookie_t acookie = xcb_get_window_attributes(ps->c, w->id);
 	xcb_get_window_attributes_reply_t *a =
-	    xcb_get_window_attributes_reply(ps->c.c, acookie, NULL);
+	    xcb_get_window_attributes_reply(ps->c, acookie, NULL);
 	if (!a || a->map_state == XCB_MAP_STATE_UNVIEWABLE) {
 		// Failed to get window attributes or geometry probably means
 		// the window is gone already. Unviewable means the window is
@@ -1659,7 +2651,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	free(a);
 
 	xcb_generic_error_t *e;
-	auto g = xcb_get_geometry_reply(ps->c.c, xcb_get_geometry(ps->c.c, w->id), &e);
+	auto g = xcb_get_geometry_reply(ps->c, xcb_get_geometry(ps->c, w->id), &e);
 	if (!g) {
 		log_error_x_error(e, "Failed to get geometry of window %#010x", w->id);
 		free(e);
@@ -1677,10 +2669,10 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	free(g);
 
 	// Create Damage for window (if not Input Only)
-	new->damage = x_new_id(&ps->c);
+	new->damage = x_new_id(ps->c);
 	e = xcb_request_check(
-	    ps->c.c, xcb_damage_create_checked(ps->c.c, new->damage, w->id,
-	                                       XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY));
+	    ps->c, xcb_damage_create_checked(ps->c, new->damage, w->id,
+	                                     XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY));
 	if (e) {
 		log_error_x_error(e, "Failed to create damage");
 		free(e);
@@ -1690,15 +2682,15 @@ struct win *fill_win(session_t *ps, struct win *w) {
 
 	// Set window event mask
 	xcb_change_window_attributes(
-	    ps->c.c, new->base.id, XCB_CW_EVENT_MASK,
+	    ps->c, new->base.id, XCB_CW_EVENT_MASK,
 	    (const uint32_t[]){determine_evmask(ps, new->base.id, WIN_EVMODE_FRAME)});
 
 	// Get notification when the shape of a window changes
 	if (ps->shape_exists) {
-		xcb_shape_select_input(ps->c.c, new->base.id, 1);
+		xcb_shape_select_input(ps->c, new->base.id, 1);
 	}
 
-	new->pictfmt = x_get_pictform_for_visual(&ps->c, new->a.visual);
+	new->pictfmt = x_get_pictform_for_visual(ps->c, new->a.visual);
 	new->client_pictfmt = NULL;
 
 	list_replace(&w->stack_neighbour, &new->base.stack_neighbour);
@@ -1718,6 +2710,19 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    ps->atoms->a_NET_WM_NAME,        ps->atoms->aWM_CLASS,
 	    ps->atoms->aWM_WINDOW_ROLE,      ps->atoms->a_COMPTON_SHADOW,
 	    ps->atoms->aWM_CLIENT_LEADER,    ps->atoms->aWM_TRANSIENT_FOR,
+		ps->atoms->a_FLY_WM_WINDOW_CORNER_RADIUS, // Kirill
+		ps->atoms->a_FLY_WM_WINDOW_ANIMATION_BLACKLIST,
+		ps->atoms->a_FLY_WM_WINDOW_MAP_ANIMATION,
+		ps->atoms->a_FLY_WM_WINDOW_UNMAP_ANIMATION,
+		ps->atoms->a_FLY_WM_SHADOW_COLOR,
+		ps->atoms->a_FLY_WM_SHADOW_OPACITY,
+	    ps->atoms->a_FLY_WM_SHADOW_RADIUS,
+	    ps->atoms->a_FLY_WM_SHADOW_OFFSET_X,
+	    ps->atoms->a_FLY_WM_SHADOW_OFFSET_Y,
+		ps->atoms->a_FLY_WM_BLUR_SIZE,
+	    ps->atoms->a_FLY_WM_BLUR_STRENGTH,
+	    ps->atoms->a_FLY_WM_BLUR_DEVIATION,
+	    ps->atoms->a_FLY_WM_BLUR_METHOD,
 	};
 	win_set_properties_stale(new, init_stale_props, ARR_SIZE(init_stale_props));
 
@@ -1768,12 +2773,12 @@ void win_update_leader(session_t *ps, struct managed_win *w) {
 	// Read the leader properties
 	if (ps->o.detect_transient && !leader) {
 		leader =
-		    wid_get_prop_window(&ps->c, w->client_win, ps->atoms->aWM_TRANSIENT_FOR);
+		    wid_get_prop_window(ps->c, w->client_win, ps->atoms->aWM_TRANSIENT_FOR);
 	}
 
 	if (ps->o.detect_client_leader && !leader) {
 		leader =
-		    wid_get_prop_window(&ps->c, w->client_win, ps->atoms->aWM_CLIENT_LEADER);
+		    wid_get_prop_window(ps->c, w->client_win, ps->atoms->aWM_CLIENT_LEADER);
 	}
 
 	win_set_leader(ps, w, leader);
@@ -1789,9 +2794,8 @@ static xcb_window_t win_get_leader_raw(session_t *ps, struct managed_win *w, int
 	// Rebuild the cache if needed
 	if (!w->cache_leader && (w->client_win || w->leader)) {
 		// Leader defaults to client window
-		if (!(w->cache_leader = w->leader)) {
+		if (!(w->cache_leader = w->leader))
 			w->cache_leader = w->client_win;
-		}
 
 		// If the leader of this window isn't itself, look for its
 		// ancestors
@@ -1799,9 +2803,8 @@ static xcb_window_t win_get_leader_raw(session_t *ps, struct managed_win *w, int
 			auto wp = find_toplevel(ps, w->cache_leader);
 			if (wp) {
 				// Dead loop?
-				if (recursions > WIN_GET_LEADER_MAX_RECURSION) {
+				if (recursions > WIN_GET_LEADER_MAX_RECURSION)
 					return XCB_NONE;
-				}
 
 				w->cache_leader = win_get_leader_raw(ps, wp, recursions + 1);
 			}
@@ -1820,9 +2823,8 @@ bool win_update_class(session_t *ps, struct managed_win *w) {
 	int nstr = 0;
 
 	// Can't do anything if there's no client window
-	if (!w->client_win) {
+	if (!w->client_win)
 		return false;
-	}
 
 	// Free and reset old strings
 	free(w->class_instance);
@@ -1911,7 +2913,20 @@ void win_set_focused(session_t *ps, struct managed_win *w) {
 	if (old_active_win) {
 		win_on_focus_change(ps, old_active_win);
 	}
+
 	win_on_focus_change(ps, w);
+
+	if((win_should_change_shadow_state(ps, old_active_win, false)))
+	{
+		win_update_shadow_geometry(ps, old_active_win);
+		win_mark_shadow_for_update(ps, old_active_win);
+	}
+
+	if((win_should_change_shadow_state(ps, w, true)))
+	{
+		win_update_shadow_geometry(ps, w);
+		win_mark_shadow_for_update(ps, w);
+	}
 }
 
 /**
@@ -1962,9 +2977,8 @@ void win_update_bounding_shape(session_t *ps, struct managed_win *w) {
 		 */
 
 		xcb_shape_get_rectangles_reply_t *r = xcb_shape_get_rectangles_reply(
-		    ps->c.c,
-		    xcb_shape_get_rectangles(ps->c.c, w->base.id, XCB_SHAPE_SK_BOUNDING),
-		    NULL);
+		    ps->c,
+		    xcb_shape_get_rectangles(ps->c, w->base.id, XCB_SHAPE_SK_BOUNDING), NULL);
 
 		if (!r) {
 			break;
@@ -2034,10 +3048,108 @@ void win_update_opacity_prop(session_t *ps, struct managed_win *w) {
 }
 
 /**
+ * Kirill
+ * Reread corners rounding property of a window.
+ */
+void win_update_rounding_prop(session_t *ps, struct managed_win *w) {
+	w->has_rounding_prop = wid_get_rounding_prop(ps, w->base.id, 0, &w->rounding_prop);
+
+	if (w->has_rounding_prop) return;
+	if (ps->o.detect_rounded_corners && w->client_win && w->base.id == w->client_win) return;
+
+	w->has_rounding_prop = wid_get_rounding_prop(ps, w->client_win, 0, &w->rounding_prop);
+}
+
+void win_update_animating_prop(session_t *ps, struct managed_win *w, xcb_atom_t atom, bool *has_prop, int *prop) {
+	*has_prop = wid_get_animating_prop(ps, w->base.id, prop, atom);
+	if (*has_prop) return;
+	*has_prop = wid_get_animating_prop(ps, w->client_win, prop, atom);
+}
+
+void win_update_shadow_color_prop(session_t *ps, struct managed_win *w) {
+	if(w->shadow_picture)
+	{
+		xcb_render_free_picture(ps->c, w->shadow_picture);
+		w->shadow_picture = 0;
+	}
+
+	w->has_shadow_color_prop =
+	    wid_get_shadow_color_prop(ps, w->base.id, &w->shadow_color_prop);
+
+	if (w->has_shadow_color_prop)
+		return;
+	if (ps->o.detect_rounded_corners && w->client_win && w->base.id == w->client_win)
+		return;
+
+	w->has_shadow_color_prop =
+	    wid_get_shadow_color_prop(ps, w->client_win, &w->shadow_color_prop);
+}
+
+void win_update_shadow_prop(session_t *ps, struct managed_win *w, xcb_atom_t atom, bool *has_prop, int *prop) {
+	if(atom == ps->atoms->a_FLY_WM_SHADOW_RADIUS && w->shadow_context)
+	{
+		if(ps->o.legacy_backends) free_conv((conv *)w->shadow_context);
+		else ps->backend_data->ops->destroy_shadow_context(ps->backend_data, w->shadow_context);
+		w->shadow_context = NULL;
+	}
+
+	*has_prop = wid_get_shadow_prop(ps, w->base.id, prop, atom);
+
+	if (*has_prop) return;
+	if (ps->o.detect_rounded_corners && w->client_win && w->base.id == w->client_win) return;
+
+	*has_prop = wid_get_shadow_prop(ps, w->client_win, prop, atom);
+}
+
+void win_update_blur_prop(session_t *ps, struct managed_win *w, xcb_atom_t atom, bool *has_prop, int *prop) {
+	if(w->blur_context)
+	{
+		ps->backend_data->ops->destroy_blur_context(ps->backend_data, w->blur_context);
+		w->blur_context = NULL;
+	}
+
+	*has_prop = wid_get_blur_prop(ps, w->base.id, prop, atom);
+
+	if (*has_prop)
+		return;
+	if (ps->o.detect_rounded_corners && w->client_win && w->base.id == w->client_win)
+		return;
+
+	*has_prop = wid_get_blur_prop(ps, w->client_win, prop, atom);
+}
+
+static bool
+win_has_any_shadow_value(session_t *ps, struct managed_win *w, uint32_t shadow_val_type)
+{
+	if(shadow_val_type == SHADOW_VAL_RADIUS)
+	{
+		if(w->has_shadow_radius_prop ||
+		   w->has_shadow_radius_rule ||
+		   ps->o.wintype_option[w->window_type].shadow_radius != INT_MAX)
+		   return true;
+		else
+			return false;
+	}
+	if(shadow_val_type == SHADOW_VAL_COLOR)
+	{
+		if(w->has_shadow_color_prop  ||
+		   w->has_shadow_color_rule ||
+	  	   (!safe_isnan(ps->o.wintype_option[w->window_type].shadow_color.red) &&
+	       !safe_isnan(ps->o.wintype_option[w->window_type].shadow_color.green) &&
+	       !safe_isnan(ps->o.wintype_option[w->window_type].shadow_color.blue)))
+		   return true;
+		else
+			return false;
+	}
+
+	return false;
+}
+
+/**
  * Retrieve frame extents from a window.
  */
 void win_update_frame_extents(session_t *ps, struct managed_win *w, xcb_window_t client) {
-	winprop_t prop = x_get_prop(&ps->c, client, ps->atoms->a_NET_FRAME_EXTENTS, 4L,
+	winprop_t prop = x_get_prop(ps->c, client, ps->atoms->a_NET_FRAME_EXTENTS, 4L,
 	                            XCB_ATOM_CARDINAL, 32);
 
 	if (prop.nitems == 4) {
@@ -2092,7 +3204,7 @@ bool win_is_region_ignore_valid(session_t *ps, const struct managed_win *w) {
  * Stop listening for events on a particular window.
  */
 void win_ev_stop(session_t *ps, const struct win *w) {
-	xcb_change_window_attributes(ps->c.c, w->id, XCB_CW_EVENT_MASK, (const uint32_t[]){0});
+	xcb_change_window_attributes(ps->c, w->id, XCB_CW_EVENT_MASK, (const uint32_t[]){0});
 
 	if (!w->managed) {
 		return;
@@ -2100,12 +3212,12 @@ void win_ev_stop(session_t *ps, const struct win *w) {
 
 	auto mw = (struct managed_win *)w;
 	if (mw->client_win) {
-		xcb_change_window_attributes(ps->c.c, mw->client_win, XCB_CW_EVENT_MASK,
+		xcb_change_window_attributes(ps->c, mw->client_win, XCB_CW_EVENT_MASK,
 		                             (const uint32_t[]){0});
 	}
 
 	if (ps->shape_exists) {
-		xcb_shape_select_input(ps->c.c, w->id, 0);
+		xcb_shape_select_input(ps->c, w->id, 0);
 	}
 }
 
@@ -2126,6 +3238,19 @@ static void unmap_win_finish(session_t *ps, struct managed_win *w) {
 		assert(!w->win_image);
 		assert(!w->shadow_image);
 	}
+
+	// Kirill
+	// Flag window so that it gets animated when it reapears
+	// in case it wasn't destroyed
+	win_set_flags(w, WIN_FLAGS_POSITION_STALE);
+	win_set_flags(w, WIN_FLAGS_SIZE_STALE);
+
+	// Force animation to completed position
+	w->animation_velocity_x = 0;
+	w->animation_velocity_y = 0;
+	w->animation_velocity_w = 0;
+	w->animation_velocity_h = 0;
+	w->animation_progress = 1.0;
 
 	free_paint(ps, &w->paint);
 	free_paint(ps, &w->shadow_paint);
@@ -2400,6 +3525,24 @@ void unmap_win_start(session_t *ps, struct managed_win *w) {
 	w->opacity_target_old = fmax(w->opacity_target, w->opacity_target_old);
 	w->opacity_target = win_calc_opacity_target(ps, w);
 
+	// Kirill
+	if (win_should_animate(ps, w)) {
+		w->dwm_mask = ANIM_UNMAP;
+		init_animation(ps, w);
+
+		double x_dist = w->animation_dest_center_x - w->animation_center_x;
+		double y_dist = w->animation_dest_center_y - w->animation_center_y;
+		double w_dist = w->animation_dest_w - w->animation_w;
+		double h_dist = w->animation_dest_h - w->animation_h;
+		w->animation_inv_og_distance = 1.0 / sqrt(x_dist * x_dist + y_dist * y_dist +
+		                                          w_dist * w_dist + h_dist * h_dist);
+
+		if (isinf(w->animation_inv_og_distance))
+			w->animation_inv_og_distance = 0;
+
+		w->animation_progress = 0.0;
+	}
+
 #ifdef CONFIG_DBUS
 	// Send D-Bus signal
 	if (ps->o.dbus) {
@@ -2433,7 +3576,7 @@ bool win_check_fade_finished(session_t *ps, struct managed_win *w) {
 		case WSTATE_DESTROYING: destroy_win_finish(ps, &w->base); return true;
 		case WSTATE_MAPPING: map_win_finish(w); return false;
 		case WSTATE_FADING: w->state = WSTATE_MAPPED; break;
-		default: unreachable();
+		default: unreachable;
 		}
 	}
 
@@ -2454,24 +3597,33 @@ bool win_skip_fading(session_t *ps, struct managed_win *w) {
 	return win_check_fade_finished(ps, w);
 }
 
-// TODO(absolutelynothelix): rename to x_update_win_(randr_?)monitor and move to
-// the x.c.
-void win_update_monitor(struct x_monitors *monitors, struct managed_win *mw) {
-	mw->randr_monitor = -1;
-	for (int i = 0; i < monitors->count; i++) {
-		auto e = pixman_region32_extents(&monitors->regions[i]);
-		if (e->x1 <= mw->g.x && e->y1 <= mw->g.y &&
-		    e->x2 >= mw->g.x + mw->widthb && e->y2 >= mw->g.y + mw->heightb) {
-			mw->randr_monitor = i;
-			log_debug("Window %#010x (%s), %dx%d+%dx%d, is entirely on the "
-			          "monitor %d (%dx%d+%dx%d)",
-			          mw->base.id, mw->name, mw->g.x, mw->g.y, mw->widthb,
-			          mw->heightb, i, e->x1, e->y1, e->x2 - e->x1, e->y2 - e->y1);
+/**
+ * Get the Xinerama screen a window is on.
+ *
+ * Return an index >= 0, or -1 if not found.
+ *
+ * TODO(yshui) move to x.c
+ * TODO(yshui) use xrandr
+ */
+void win_update_screen(int nscreens, region_t *screens, struct managed_win *w) {
+	w->xinerama_scr = -1;
+
+	for (int i = 0; i < nscreens; i++) {
+		auto e = pixman_region32_extents(&screens[i]);
+		if (e->x1 <= w->g.x && e->y1 <= w->g.y && e->x2 >= w->g.x + w->widthb &&
+		    e->y2 >= w->g.y + w->heightb) {
+			w->xinerama_scr = i;
+			log_debug("Window %#010x (%s), %dx%d+%dx%d, is on screen "
+			          "%d "
+			          "(%dx%d+%dx%d)",
+			          w->base.id, w->name, w->g.x, w->g.y, w->widthb, w->heightb,
+			          i, e->x1, e->y1, e->x2 - e->x1, e->y2 - e->y1);
 			return;
 		}
 	}
-	log_debug("Window %#010x (%s), %dx%d+%dx%d, is not entirely on any monitor",
-	          mw->base.id, mw->name, mw->g.x, mw->g.y, mw->widthb, mw->heightb);
+	log_debug("Window %#010x (%s), %dx%d+%dx%d, is not contained by any "
+	          "screen",
+	          w->base.id, w->name, w->g.x, w->g.y, w->g.width, w->g.height);
 }
 
 /// Map an already registered window
@@ -2524,6 +3676,7 @@ void map_win_start(session_t *ps, struct managed_win *w) {
 
 	// XXX We need to make sure that win_data is available
 	// iff `state` is MAPPED
+	w->dwm_mask = ANIM_MAP;
 	w->state = WSTATE_MAPPING;
 	w->opacity_target_old = 0;
 	w->opacity_target = win_calc_opacity_target(ps, w);
@@ -2677,12 +3830,11 @@ struct managed_win *find_managed_window_or_parent(session_t *ps, xcb_window_t wi
 	// We traverse through its ancestors to find out the frame
 	// Using find_win here because if we found a unmanaged window we know
 	// about, we can stop early.
-	while (wid && wid != ps->c.screen_info->root && !(w = find_win(ps, wid))) {
+	while (wid && wid != ps->root && !(w = find_win(ps, wid))) {
 		// xcb_query_tree probably fails if you run picom when X is
 		// somehow initializing (like add it in .xinitrc). In this case
 		// just leave it alone.
-		auto reply =
-		    xcb_query_tree_reply(ps->c.c, xcb_query_tree(ps->c.c, wid), NULL);
+		auto reply = xcb_query_tree_reply(ps->c, xcb_query_tree(ps->c, wid), NULL);
 		if (reply == NULL) {
 			break;
 		}
@@ -2712,6 +3864,29 @@ static inline bool rect_is_fullscreen(const session_t *ps, int x, int y, int wid
  */
 static inline bool
 win_is_fullscreen_xcb(xcb_connection_t *c, const struct atom *a, const xcb_window_t w) {
+	short res=0;
+	xcb_get_property_cookie_t prop =
+	    xcb_get_property(c, 0, w, a->a_NET_WM_STATE, XCB_ATOM_ATOM, 0, 12);
+	xcb_get_property_reply_t *reply = xcb_get_property_reply(c, prop, NULL);
+	if (!reply) {
+		return false;
+	}
+
+	if (reply->length) {
+		xcb_atom_t *val = xcb_get_property_value(reply);
+		for (uint32_t i = 0; i < reply->length; i++) {
+			     if (val[i] == a->a_NET_WM_STATE_MAXIMIZED_VERT) res++;
+			else if (val[i] == a->a_NET_WM_STATE_MAXIMIZED_HORZ) res++;
+			if (res==2) break;
+		}
+	}
+	free(reply);
+	return res==2?true:false;
+}
+
+//alex
+static inline bool
+win_is_maximized_xcb(xcb_connection_t *c, const struct atom *a, const xcb_window_t w) {
 	xcb_get_property_cookie_t prop =
 	    xcb_get_property(c, 0, w, a->a_NET_WM_STATE, XCB_ATOM_ATOM, 0, 12);
 	xcb_get_property_reply_t *reply = xcb_get_property_reply(c, prop, NULL);
@@ -2737,6 +3912,10 @@ win_is_fullscreen_xcb(xcb_connection_t *c, const struct atom *a, const xcb_windo
 void win_set_flags(struct managed_win *w, uint64_t flags) {
 	log_debug("Set flags %" PRIu64 " to window %#010x (%s)", flags, w->base.id, w->name);
 	if (unlikely(w->state == WSTATE_DESTROYING)) {
+		if (w->animation_progress != 1.0) { // Kirill
+			// Return because animation will trigger some of the flags
+			return;
+		}
 		log_error("Flags set on a destroyed window %#010x (%s)", w->base.id, w->name);
 		return;
 	}
@@ -2749,6 +3928,10 @@ void win_clear_flags(struct managed_win *w, uint64_t flags) {
 	log_debug("Clear flags %" PRIu64 " from window %#010x (%s)", flags, w->base.id,
 	          w->name);
 	if (unlikely(w->state == WSTATE_DESTROYING)) {
+		if (w->animation_progress != 1.0) { // Kirill
+			// Return because animation will trigger some of the flags
+			return;
+		}
 		log_warn("Flags cleared on a destroyed window %#010x (%s)", w->base.id,
 		         w->name);
 		return;
@@ -2758,7 +3941,7 @@ void win_clear_flags(struct managed_win *w, uint64_t flags) {
 }
 
 void win_set_properties_stale(struct managed_win *w, const xcb_atom_t *props, int nprops) {
-	auto const bits_per_element = sizeof(*w->stale_props) * 8;
+	const auto bits_per_element = sizeof(*w->stale_props) * 8;
 	size_t new_capacity = w->stale_props_capacity;
 
 	// Calculate the new capacity of the properties array
@@ -2793,13 +3976,14 @@ static void win_clear_all_properties_stale(struct managed_win *w) {
 }
 
 static bool win_fetch_and_unset_property_stale(struct managed_win *w, xcb_atom_t prop) {
-	auto const bits_per_element = sizeof(*w->stale_props) * 8;
+	const auto bits_per_element = sizeof(*w->stale_props) * 8;
 	if (prop >= w->stale_props_capacity * bits_per_element) {
 		return false;
 	}
 
-	auto const mask = 1UL << (prop % bits_per_element);
+	const auto mask = 1UL << (prop % bits_per_element);
 	bool ret = w->stale_props[prop / bits_per_element] & mask;
+
 	w->stale_props[prop / bits_per_element] &= ~mask;
 	return ret;
 }
@@ -2819,11 +4003,19 @@ bool win_check_flags_all(struct managed_win *w, uint64_t flags) {
  */
 bool win_is_fullscreen(const session_t *ps, const struct managed_win *w) {
 	if (!ps->o.no_ewmh_fullscreen &&
-	    win_is_fullscreen_xcb(ps->c.c, ps->atoms, w->client_win)) {
+	    win_is_fullscreen_xcb(ps->c, ps->atoms, w->client_win)) {
 		return true;
 	}
 	return rect_is_fullscreen(ps, w->g.x, w->g.y, w->widthb, w->heightb) &&
 	       (!w->bounding_shaped || w->rounded_corners);
+}
+
+//alex: check maximized
+bool win_is_maximized(const session_t *ps, const struct managed_win *w) {
+	if (win_is_maximized_xcb(ps->c, ps->atoms, w->client_win)) {
+		return true;
+	}
+	return false;
 }
 
 /**
@@ -2834,7 +4026,7 @@ bool win_is_fullscreen(const session_t *ps, const struct managed_win *w) {
 bool win_is_bypassing_compositor(const session_t *ps, const struct managed_win *w) {
 	bool ret = false;
 
-	auto prop = x_get_prop(&ps->c, w->client_win, ps->atoms->a_NET_WM_BYPASS_COMPOSITOR,
+	auto prop = x_get_prop(ps->c, w->client_win, ps->atoms->a_NET_WM_BYPASS_COMPOSITOR,
 	                       1L, XCB_ATOM_CARDINAL, 32);
 
 	if (prop.nitems && *prop.c32 == 1) {
@@ -2855,13 +4047,13 @@ bool win_is_focused_raw(const session_t *ps, const struct managed_win *w) {
 
 // Find the managed window immediately below `i` in the window stack
 struct managed_win *
-win_stack_find_next_managed(const session_t *ps, const struct list_node *w) {
-	while (!list_node_is_last(&ps->window_stack, w)) {
-		auto next = list_entry(w->next, struct win, stack_neighbour);
+win_stack_find_next_managed(const session_t *ps, const struct list_node *i) {
+	while (!list_node_is_last(&ps->window_stack, i)) {
+		auto next = list_entry(i->next, struct win, stack_neighbour);
 		if (next->managed) {
 			return (struct managed_win *)next;
 		}
-		w = &next->stack_neighbour;
+		i = &next->stack_neighbour;
 	}
 	return NULL;
 }

@@ -23,7 +23,8 @@ struct backend_operations;
 
 typedef struct backend_base {
 	struct backend_operations *ops;
-	struct x_connection *c;
+	xcb_connection_t *c;
+	xcb_window_t root;
 	struct ev_loop *loop;
 
 	/// Whether the backend can accept new render request at the moment
@@ -119,7 +120,11 @@ struct backend_operations {
 	// ===========    Initialization    ===========
 
 	/// Initialize the backend, prepare for rendering to the target window.
-	backend_t *(*init)(session_t *, xcb_window_t)attr_nonnull(1);
+	/// Here is how you should choose target window:
+	///    1) if ps->overlay is not XCB_NONE, use that
+	///    2) use ps->root otherwise
+	// TODO(yshui) make the target window a parameter
+	backend_t *(*init)(session_t *)attr_nonnull(1);
 	void (*deinit)(backend_t *backend_data) attr_nonnull(1);
 
 	/// Called when rendering will be stopped for an unknown amount of
@@ -176,7 +181,7 @@ struct backend_operations {
 	 */
 	void (*compose)(backend_t *backend_data, void *image_data, coord_t image_dst,
 	                void *mask, coord_t mask_dst, const region_t *reg_paint,
-	                const region_t *reg_visible);
+	                const region_t *reg_visible, bool lerp);
 
 	/// Fill rectangle of the rendering buffer, mostly for debug purposes, optional.
 	void (*fill)(backend_t *backend_data, struct color, const region_t *clip);
@@ -187,7 +192,7 @@ struct backend_operations {
 	/// mask is.
 	bool (*blur)(backend_t *backend_data, double opacity, void *blur_ctx, void *mask,
 	             coord_t mask_dst, const region_t *reg_blur,
-	             const region_t *reg_visible) attr_nonnull(1, 3, 6, 7);
+	             const region_t *reg_visible) attr_nonnull(1, 3, 4, 6, 7);
 
 	/// Update part of the back buffer with the rendering buffer, then present the
 	/// back buffer onto the target window (if not back buffered, update part of the
@@ -211,18 +216,18 @@ struct backend_operations {
 	                     struct xvisual_info fmt, bool owned);
 
 	/// Create a shadow context for rendering shadows with radius `radius`.
-	/// Default implementation: default_create_shadow_context
+	/// Default implementation: default_backend_create_shadow_context
 	struct backend_shadow_context *(*create_shadow_context)(backend_t *backend_data,
 	                                                        double radius);
 	/// Destroy a shadow context
-	/// Default implementation: default_destroy_shadow_context
+	/// Default implementation: default_backend_destroy_shadow_context
 	void (*destroy_shadow_context)(backend_t *backend_data,
 	                               struct backend_shadow_context *ctx);
 
 	/// Create a shadow image based on the parameters. Resulting image should have a
 	/// size of `width + radisu * 2` x `height + radius * 2`. Radius is set when the
 	/// shadow context is created.
-	/// Default implementation: default_render_shadow
+	/// Default implementation: default_backend_render_shadow
 	///
 	/// Required.
 	void *(*render_shadow)(backend_t *backend_data, int width, int height,
@@ -286,14 +291,6 @@ struct backend_operations {
 	///
 	/// Optional
 	int (*buffer_age)(backend_t *backend_data);
-
-	/// Get the render time of the last frame. If the render is still in progress,
-	/// returns false. The time is returned in `ts`. Frames are delimited by the
-	/// present() calls. i.e. after a present() call, last_render_time() should start
-	/// reporting the time of the just presen1ted frame.
-	///
-	/// Optional, if not available, the most conservative estimation will be used.
-	bool (*last_render_time)(backend_t *backend_data, struct timespec *ts);
 
 	/// The maximum number buffer_age might return.
 	int max_buffer_age;
@@ -366,4 +363,5 @@ struct backend_operations {
 
 extern struct backend_operations *backend_list[];
 
-void paint_all_new(session_t *ps, struct managed_win *const t) attr_nonnull(1);
+void paint_all_new(session_t *ps, struct managed_win *const t, bool ignore_damage)
+    attr_nonnull(1);
