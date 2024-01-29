@@ -499,8 +499,10 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 		win_update_opacity_target(ps, w);
 	}
 
+	// Kirill - update a window corner raduis in reply to _FLY_WM_WINDOW_CORNER_RADIUS
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_WINDOW_CORNER_RADIUS)) {
 		win_update_rounding_prop(ps, w);
+		assert(w->state != WSTATE_DESTROYING);
 		win_determine_rounded_corners(ps, w);
 		win_update_bounding_shape(ps, w);
 		add_damage_from_win(ps, w);
@@ -559,13 +561,11 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_COLOR)) {
 		win_update_shadow_color_prop(ps, w);
 		win_mark_shadow_for_update(ps, w);
-		add_damage_from_win(ps, w);
 	}
 
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_OPACITY)) {
 		win_update_shadow_prop(ps, w, ps->atoms->a_FLY_WM_SHADOW_OPACITY, &w->has_shadow_opacity_prop, &w->shadow_opacity_prop);
 		win_mark_shadow_for_update(ps, w);
-		add_damage_from_win(ps, w);
 	}
 
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_SHADOW_RADIUS)) {
@@ -924,6 +924,7 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 
 void win_mark_shadow_for_update(session_t *ps, struct managed_win *w)
 {
+	add_damage_from_win(ps, w);
 	win_set_flags(w, WIN_FLAGS_SHADOW_STALE);
 	win_release_mask(ps->backend_data, w);
 	free_paint(ps, &w->shadow_paint);
@@ -2892,26 +2893,6 @@ static void win_on_focus_change(session_t *ps, struct managed_win *w) {
 #endif
 }
 
-void wins_update_shadow_states(session_t *ps, struct managed_win *old_active_win, struct managed_win *active_win)
-{
-	if((win_should_change_shadow_state(ps, old_active_win, false)))
-	{
-		win_update_shadow_geometry(ps, old_active_win);
-		win_mark_shadow_for_update(ps, old_active_win);
-	}
-
-	if((win_should_change_shadow_state(ps, active_win, true)))
-	{
-		win_update_shadow_geometry(ps, active_win);
-		win_mark_shadow_for_update(ps, active_win);
-	}
-
-	// TODO:Kirill - maybe use only root_damaged(ps)
-	// need tranfer this call somewhere
-	if(ps->o.backend == BKEND_XRENDER)
-		force_repaint(ps);
-}
-
 /**
  * Set real focused state of a window.
  */
@@ -2935,8 +2916,17 @@ void win_set_focused(session_t *ps, struct managed_win *w) {
 
 	win_on_focus_change(ps, w);
 
-	if(ps->o.shadow_active)
-		wins_update_shadow_states(ps, old_active_win, w);
+	if((win_should_change_shadow_state(ps, old_active_win, false)))
+	{
+		win_update_shadow_geometry(ps, old_active_win);
+		win_mark_shadow_for_update(ps, old_active_win);
+	}
+
+	if((win_should_change_shadow_state(ps, w, true)))
+	{
+		win_update_shadow_geometry(ps, w);
+		win_mark_shadow_for_update(ps, w);
+	}
 }
 
 /**
