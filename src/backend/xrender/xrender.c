@@ -251,12 +251,18 @@ compose_impl(struct _xrender_data *xd, struct xrender_image *xrimg, coord_t dst,
 		    inner->height, (int)img->corner_radius);
 	}
 	if (((img->color_inverted || img->dim != 0) && has_alpha) || img->corner_radius != 0) {
-		// Apply image properties using a temporary image, because the source
-		// image is transparent. Otherwise the properties can be applied directly
-		// on the target image.
+		// image is transparent or will get transparent corners. Otherwise the
+ 		// properties can be applied directly on the target image.
+ 		// Also force a 32-bit ARGB visual for transparent corners, otherwise the
+ 		// corners become black.
+ 		auto visual =
+ 		    (img->corner_radius != 0 && inner->depth != 32)
+ 		        ? x_get_visual_for_standard(xd->base.c, XCB_PICT_STANDARD_ARGB_32)
+ 		        : inner->visual;
+
 		auto tmp_pict =
 		    x_create_picture_with_visual(xd->base.c, xd->base.root, inner->width,
-		                                 inner->height, inner->visual, 0, NULL);
+		                                 inner->height, visual, 0, NULL);
 
 		// Set clip region translated to source coordinate
 		x_set_picture_clip_region(xd->base.c, tmp_pict, to_i16_checked(-dst.x),
@@ -494,6 +500,10 @@ static bool blur(backend_t *backend_data, double opacity, void *ctx_, void *mask
 		    to_i16_checked(extent_resized->y1), width_resized, height_resized);
 	}
 
+	if (mask_allocated) {
+		xcb_render_free_picture(c, mask_pict);
+	}
+
 	xcb_render_free_picture(c, tmp_picture[0]);
 	xcb_render_free_picture(c, tmp_picture[1]);
 	pixman_region32_fini(&reg_op);
@@ -508,6 +518,7 @@ bind_pixmap(backend_t *base, xcb_pixmap_t pixmap, struct xvisual_info fmt, bool 
 	if (!r) {
 		log_error("Invalid pixmap: %#010x", pixmap);
 		x_print_error(e->full_sequence, e->major_code, e->minor_code, e->error_code);
+		free(e);
 		return NULL;
 	}
 
@@ -553,7 +564,7 @@ release_rounded_corner_cache(backend_t *base, struct xrender_rounded_rectangle_c
 	assert(cache->refcount > 0);
 	cache->refcount--;
 	if (cache->refcount == 0) {
-		xcb_free_pixmap(base->c, cache->p);
+		xcb_render_free_picture(base->c, cache->p);
 		free(cache);
 	}
 }
@@ -575,9 +586,13 @@ static void deinit(backend_t *backend_data) {
 		xcb_render_free_picture(xd->base.c, xd->alpha_pict[i]);
 	}
 	xcb_render_free_picture(xd->base.c, xd->target);
-	for (int i = 0; i < 2; i++) {
-		xcb_render_free_picture(xd->base.c, xd->back[i]);
-		xcb_free_pixmap(xd->base.c, xd->back_pixmap[i]);
+	for (int i = 0; i < 3; i++) {
+		if (xd->back[i] != XCB_NONE) {
+			xcb_render_free_picture(xd->base.c, xd->back[i]);
+		}
+		if (xd->back_pixmap[i] != XCB_NONE) {
+			xcb_free_pixmap(xd->base.c, xd->back_pixmap[i]);
+		}
 	}
 	if (xd->present_event) {
 		xcb_unregister_for_special_event(xd->base.c, xd->present_event);
