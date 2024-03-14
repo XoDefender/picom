@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <X11/Xlib.h>
 
 #include "compiler.h"
 #include "config.h"
@@ -24,6 +25,8 @@ struct backend_operations;
 typedef struct backend_base {
 	struct backend_operations *ops;
 	xcb_connection_t *c;
+	Display *dpy;
+	int scr;
 	xcb_window_t root;
 	struct ev_loop *loop;
 

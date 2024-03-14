@@ -959,6 +959,16 @@ void gl_deinit(struct gl_data *gd) {
 		gd->default_shader = NULL;
 	}
 
+	glDeleteProgram(gd->present_prog);
+	gd->present_prog = 0;
+
+	glDeleteProgram(gd->fill_shader.prog);
+	glDeleteProgram(gd->brightness_shader.prog);
+	glDeleteProgram(gd->shadow_shader.prog);
+	gd->fill_shader.prog = 0;
+	gd->brightness_shader.prog = 0;
+	gd->shadow_shader.prog = 0;
+
 	glDeleteTextures(1, &gd->default_mask_texture);
  	glDeleteTextures(1, &gd->back_texture);
 

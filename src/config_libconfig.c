@@ -596,7 +596,7 @@ char *parse_config_libconfig(options_t *opt, const char *config_file, bool *shad
 	// --detect-client-opacity
 	lcfg_lookup_bool(&cfg, "detect-client-opacity", &opt->detect_client_opacity);
 	// --enable-transparency //alex
-    config_lookup_bool(&cfg, "enable-transparency", &opt->enable_transparency); //alex
+    lcfg_lookup_bool(&cfg, "enable-transparency", &opt->enable_transparency); //alex
 	// --refresh-rate
 	if (config_lookup_int(&cfg, "refresh-rate", &ival)) {
 		log_warn("The refresh-rate %s", deprecation_message);
