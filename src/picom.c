@@ -1878,6 +1878,33 @@ static bool load_shader_source_for_condition(const c2_lptr_t *cond, void *data) 
 	return load_shader_source(data, c2_list_get_data(cond));
 }
 
+static bool is_glx_compatible_opengl(session_t *ps)
+{
+	bool is_modern = true;
+
+    int nitems = 0;
+	XVisualInfo vreq = {.visualid = ps->vis};
+    XVisualInfo *visual_info = XGetVisualInfo(ps->dpy, VisualIDMask, &vreq, &nitems);
+	
+    GLXContext gl_context = glXCreateContext(ps->dpy, visual_info, NULL, GL_TRUE);
+    glXMakeCurrent(ps->dpy, ps->root, gl_context);
+
+	GLint major, minor; 
+	glGetIntegerv(GL_MAJOR_VERSION, &major); 
+	glGetIntegerv(GL_MINOR_VERSION, &minor); 
+    if (major < 3 || (major == 3 && minor < 3)) {
+		log_warn("The OpenGL version is < 3.3, trying legacy glx backend");
+		ps->o.legacy_backends = true;
+		is_modern = false;
+    }
+
+	XFree(visual_info);
+	glXMakeCurrent(ps->dpy, None, NULL);
+    glXDestroyContext(ps->dpy, gl_context);
+
+	return is_modern;
+}
+
 /**
  * Initialize a session.
  *
@@ -2207,6 +2234,9 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 			log_debug("%s", shader->source);
 		}
 	}
+
+	if(bkend_use_glx(ps) && !ps->o.legacy_backends)
+		if(!is_glx_compatible_opengl(ps)) ps->o.legacy_backends = true;
 
 	if (ps->o.legacy_backends) {
 		ps->shadow_context =
