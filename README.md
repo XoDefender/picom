@@ -1,3 +1,8 @@
+## Features that are added (inspect sample.conf for more information)
+1. Animation support with corresponding rules, props, and wintypes.
+2. Feature of specifying rules and props for blur, corner rounding, shadows.
+3. Feature of specifying shadow properties for an active window.
+
 picom
 =====
 
