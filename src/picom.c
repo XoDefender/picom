@@ -1892,8 +1892,9 @@ static void check_glx_compatibility(session_t *ps)
 	|| strncmp(renderer, "softpipe", strlen("softpipe")) == 0
 	|| strncmp(renderer, "Software Rasterizer", strlen("Software Rasterizer")) == 0)
 	{
-		log_warn("The OpenGL driver is unstable with glx, trying xrender backend");
-		ps->o.backend = BKEND_XRENDER;
+		log_warn("The OpenGL driver is unstable with modern glx, trying the legacy one");
+		ps->o.legacy_backends = true;
+		ps->o.glx_no_rebind_pixmap = false;
 	}
 
 	GLint major, minor; 
