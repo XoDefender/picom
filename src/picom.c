@@ -893,6 +893,26 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 				pixman_region32_init_rect(&w->bounding_shape, 0, 0,
 				                          (uint)w->widthb, (uint)w->heightb);
 
+				if(w->bounding_shaped)
+				{
+					xcb_shape_get_rectangles_reply_t *r = xcb_shape_get_rectangles_reply(ps->c, xcb_shape_get_rectangles(ps->c, w->base.id, XCB_SHAPE_SK_BOUNDING), NULL);
+					if (r) 
+					{
+						xcb_rectangle_t *xrects = xcb_shape_get_rectangles_rectangles(r);
+						int nrects = xcb_shape_get_rectangles_rectangles_length(r);
+						rect_t *rects = from_x_rects(nrects, xrects);
+						free(r);
+
+						region_t br;
+						pixman_region32_init_rects(&br, rects, nrects);
+						free(rects);
+
+						pixman_region32_translate(&br, w->g.border_width, w->g.border_width);
+						pixman_region32_intersect(&w->bounding_shape, &w->bounding_shape, &br);
+						pixman_region32_fini(&br);
+					}
+				}
+
 				win_clear_flags(w, WIN_FLAGS_PIXMAP_STALE);
 				win_process_image_flags(ps, w);
 			}
