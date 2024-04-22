@@ -29,15 +29,22 @@ enum driver {
 	DRIVER_NOUVEAU = 16,
 	DRIVER_INTEL = 32,
 	DRIVER_MODESETTING = 64,
+	DRIVER_LLVMPIPE = 128,
+	DRIVER_SOFTPIPE = 256,
+	DRIVER_PANFROST = 512,
+	DRIVER_SWRAST = 1024,
+	DRIVER_UNKNOWN = 2048,
 };
 
 static const char *driver_names[] = {
-    "AMDGPU", "Radeon", "fglrx", "NVIDIA", "nouveau", "Intel", "modesetting",
+    "AMDGPU", "Radeon", "fglrx", "NVIDIA", "nouveau",
+	"Intel", "modesetting", "llvmpipe", "softpipe", "Panfrost",
+	"Software rasterizer",
 };
 
-/// Return a list of all drivers currently in use by the X server.
-/// Note, this is a best-effort test, so no guarantee all drivers will be detected.
-enum driver detect_driver(xcb_connection_t *, struct backend_base *, xcb_window_t);
+/// Return a list of all drivers currently in use.
+/// Includes getting as X server as OpenGL drivers
+enum driver detect_driver(struct session *, struct backend_base *, xcb_window_t);
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
 void apply_driver_workarounds(struct session *ps, enum driver);

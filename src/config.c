@@ -1007,11 +1007,13 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 		.animations = false,
 	    .animation_for_open_window = OPEN_WINDOW_ANIMATION_NONE,
 	    .animation_for_transient_window = OPEN_WINDOW_ANIMATION_NONE,
-       .animation_for_unmap_window = OPEN_WINDOW_ANIMATION_NONE,
+        .animation_for_unmap_window = OPEN_WINDOW_ANIMATION_NONE,
 	    .animation_stiffness = 200.0,
 	    .animation_window_mass = 1.0,
 	    .animation_dampening = 25,
 	    .animation_clamping = true,
+
+		.force_glx = false,
 	};
 	// clang-format on
 

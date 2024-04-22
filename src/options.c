@@ -567,6 +567,8 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			opt->backend = parse_backend(optarg);
 			if (opt->backend >= NUM_BKEND)
 				exit(1);
+			if(opt->backend == BKEND_GLX)
+				opt->force_glx = true;
 			break;
 		P_CASEBOOL(291, glx_no_stencil);
 		P_CASEINT(293, benchmark);

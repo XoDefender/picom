@@ -1540,7 +1540,7 @@ static bool redirect_start(session_t *ps) {
 	ps->first_frame = true;
 
 	// Re-detect driver since we now have a backend
-	ps->drivers = detect_driver(ps->c, ps->backend_data, ps->root);
+	ps->drivers = detect_driver(ps, ps->backend_data, ps->root);
 	apply_driver_workarounds(ps, ps->drivers);
 
 	root_damaged(ps);
@@ -1898,38 +1898,6 @@ static bool load_shader_source_for_condition(const c2_lptr_t *cond, void *data) 
 	return load_shader_source(data, c2_list_get_data(cond));
 }
 
-static void check_glx_compatibility(session_t *ps)
-{
-    int nitems = 0;
-	XVisualInfo vreq = {.visualid = ps->vis};
-    XVisualInfo *visual_info = XGetVisualInfo(ps->dpy, VisualIDMask, &vreq, &nitems);
-	
-    GLXContext gl_context = glXCreateContext(ps->dpy, visual_info, NULL, GL_TRUE);
-    glXMakeCurrent(ps->dpy, ps->root, gl_context);
-
-	const char *renderer = (const char *)glGetString(GL_RENDERER);
-	if(strncmp(renderer, "llvmpipe", strlen("llvmpipe")) == 0 
-	|| strncmp(renderer, "softpipe", strlen("softpipe")) == 0
-	|| strncmp(renderer, "Software Rasterizer", strlen("Software Rasterizer")) == 0)
-	{
-		log_warn("The OpenGL driver is unstable with glx, trying xrender backend");
-		ps->o.backend = BKEND_XRENDER;
-	}
-
-	GLint major, minor; 
-	glGetIntegerv(GL_MAJOR_VERSION, &major); 
-	glGetIntegerv(GL_MINOR_VERSION, &minor); 
-    if (bkend_use_glx(ps) && (major < 3 || (major == 3 && minor < 3))) 
-	{
-		log_warn("The OpenGL version is < 3.3, trying legacy glx backend");
-		ps->o.legacy_backends = true;
-    }
-
-	XFree(visual_info);
-	glXMakeCurrent(ps->dpy, None, NULL);
-    glXDestroyContext(ps->dpy, gl_context);
-}
-
 /**
  * Initialize a session.
  *
@@ -2153,9 +2121,6 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	if (IS_ERR(config_file_to_free)) {
 		return NULL;
 	}
-
-	if(bkend_use_glx(ps))
-		check_glx_compatibility(ps);
 
 	// Parse all of the rest command line options
 	if (!get_cfg(&ps->o, argc, argv, shadow_enabled, fading_enable, hasneg, winopt_mask)) {
@@ -2409,7 +2374,7 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		}
 	}
 
-	ps->drivers = detect_driver(ps->c, ps->backend_data, ps->root);
+	ps->drivers = detect_driver(ps, ps->backend_data, ps->root);
 	apply_driver_workarounds(ps, ps->drivers);
 
 	// Initialize filters, must be preceded by OpenGL context creation
