@@ -44,10 +44,10 @@ static const char *driver_names[] = {
 
 /// Return a list of all drivers currently in use.
 /// Includes getting as X server as OpenGL drivers
-enum driver detect_driver(struct session *, struct backend_base *, xcb_window_t);
+enum driver detect_driver(struct session *);
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
-void apply_driver_workarounds(struct session *ps, enum driver);
+void apply_driver_workarounds(struct session *ps);
 
 // Print driver names to stdout, for diagnostics
 static inline void print_drivers(enum driver drivers) {

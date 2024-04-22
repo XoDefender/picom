@@ -13,11 +13,11 @@
 #include "log.h"
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
-void apply_driver_workarounds(struct session *ps, enum driver driver) {
-	if (!ps->backend_data && driver & DRIVER_LLVMPIPE && !ps->o.force_glx)
+void apply_driver_workarounds(struct session *ps) {
+	if (!ps->backend_data && ps->drivers & DRIVER_LLVMPIPE && !ps->o.force_glx)
 		ps->o.backend = BKEND_XRENDER;
 
-	if (driver & DRIVER_NVIDIA) {
+	if (ps->drivers & DRIVER_NVIDIA) {
 		setenv("__GL_MaxFramesAllowed", "1", true);
 		ps->o.xrender_sync_fence = true;
 	}
@@ -104,15 +104,15 @@ void detect_driver_opengl(session_t *ps, enum driver* ret)
     glXDestroyContext(ps->dpy, gl_context);
 }
 
-enum driver detect_driver(struct session *ps, backend_t *backend_data, xcb_window_t window) 
+enum driver detect_driver(struct session *ps) 
 {
 	enum driver ret = 0;
 	
-	detect_driver_ddx(ps->c, window, &ret);
+	detect_driver_ddx(ps->c, ps->root, &ret);
 	detect_driver_opengl(ps, &ret);
 
-	if (backend_data && backend_data->ops->detect_driver) {
-		ret |= backend_data->ops->detect_driver(backend_data);
+	if (ps->backend_data && ps->backend_data->ops->detect_driver) {
+		ret |= ps->backend_data->ops->detect_driver(ps->backend_data);
 	}
 
 	return ret;

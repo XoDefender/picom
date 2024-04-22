@@ -1540,8 +1540,8 @@ static bool redirect_start(session_t *ps) {
 	ps->first_frame = true;
 
 	// Re-detect driver since we now have a backend
-	ps->drivers = detect_driver(ps, ps->backend_data, ps->root);
-	apply_driver_workarounds(ps, ps->drivers);
+	ps->drivers = detect_driver(ps);
+	apply_driver_workarounds(ps);
 
 	root_damaged(ps);
 
@@ -2374,8 +2374,8 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		}
 	}
 
-	ps->drivers = detect_driver(ps, ps->backend_data, ps->root);
-	apply_driver_workarounds(ps, ps->drivers);
+	ps->drivers = detect_driver(ps);
+	apply_driver_workarounds(ps);
 
 	// Initialize filters, must be preceded by OpenGL context creation
 	if (ps->o.legacy_backends && !init_render(ps)) {
