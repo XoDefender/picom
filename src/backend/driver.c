@@ -12,9 +12,17 @@
 #include "compiler.h"
 #include "log.h"
 
+bool is_software_render(enum driver driver)
+{
+	if(driver & DRIVER_LLVMPIPE || driver & DRIVER_SOFTPIPE || driver & DRIVER_SWRAST)
+		return true;
+	else 
+		return false;
+}
+
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
 void apply_driver_workarounds(struct session *ps) {
-	if (!ps->backend_data && ps->drivers & DRIVER_LLVMPIPE && !ps->o.force_glx)
+	if (bkend_use_glx(ps) && !ps->o.force_glx && is_software_render(ps->drivers))
 		ps->o.backend = BKEND_XRENDER;
 
 	if (ps->drivers & DRIVER_NVIDIA) {

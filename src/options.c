@@ -561,6 +561,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		case 289:
 			// --opengl
 			opt->backend = BKEND_GLX;
+			opt->force_glx = true;
 			break;
 		case 290:
 			// --backend
