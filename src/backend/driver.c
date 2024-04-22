@@ -22,7 +22,7 @@ bool is_software_render(enum driver driver)
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
 void apply_driver_workarounds(struct session *ps) {
-	if (bkend_use_glx(ps) && !ps->o.force_glx && is_software_render(ps->drivers))
+	if (!is_bkend_ready(ps) && !ps->o.force_glx && is_software_render(ps->drivers))
 		ps->o.backend = BKEND_XRENDER;
 
 	if (ps->drivers & DRIVER_NVIDIA) {
@@ -87,9 +87,7 @@ void detect_driver_ddx(xcb_connection_t *c, xcb_window_t window, enum driver* re
 
 void detect_driver_opengl(session_t *ps, enum driver* ret) 
 {
-	// Do not check the context, assume it exists as there are no errors
-	if(ps->backend_data || ps->psglx)
-		return;
+	if(is_bkend_ready(ps)) return;
 
 	int nitems = 0;
 	XVisualInfo vreq = {.visualid = ps->vis};

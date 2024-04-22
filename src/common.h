@@ -474,6 +474,20 @@ static inline bool bkend_use_glx(session_t *ps) {
 	return BKEND_GLX == ps->o.backend || BKEND_XR_GLX_HYBRID == ps->o.backend;
 }
 
+/**
+ * Check if current backend uses XRender for rendering.
+ */
+static inline bool bkend_use_xrender(session_t *ps) {
+	return BKEND_XRENDER == ps->o.backend || BKEND_XR_GLX_HYBRID == ps->o.backend;
+}
+
+/**
+ * Check if the backend is initialized.
+ */
+static inline bool is_bkend_ready(struct session *ps) {
+	return ps->backend_data || ps->psglx;
+}
+
 static void set_ignore(session_t *ps, unsigned long sequence) {
 	if (ps->o.show_all_xerrors)
 		return;

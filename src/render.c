@@ -105,13 +105,6 @@ static inline bool paint_bind_tex(session_t *ps, paint_t *ppaint, int wid, int h
 	return true;
 }
 
-/**
- * Check if current backend uses XRender for rendering.
- */
-static inline bool bkend_use_xrender(session_t *ps) {
-	return BKEND_XRENDER == ps->o.backend || BKEND_XR_GLX_HYBRID == ps->o.backend;
-}
-
 int maximum_buffer_age(session_t *ps) {
 	if (bkend_use_glx(ps) && ps->o.use_damage) {
 		return CGLX_MAX_BUFFER_AGE;
