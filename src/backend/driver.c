@@ -14,10 +14,7 @@
 
 bool is_software_render(enum driver driver)
 {
-	if(driver & DRIVER_LLVMPIPE || driver & DRIVER_SOFTPIPE || driver & DRIVER_SWRAST)
-		return true;
-	else 
-		return false;
+	return driver & DRIVER_LLVMPIPE || driver & DRIVER_SOFTPIPE || driver & DRIVER_SWRAST;
 }
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
