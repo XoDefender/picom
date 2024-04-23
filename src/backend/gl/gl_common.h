@@ -137,8 +137,6 @@ GLuint gl_create_program_from_strv(const char **vert_shaders, const char **frag_
 void *gl_create_window_shader(backend_t *backend_data, const char *source);
 void gl_destroy_window_shader(backend_t *backend_data, void *shader);
 uint64_t gl_get_shader_attributes(backend_t *backend_data, void *shader);
-bool gl_set_image_property(backend_t *backend_data, enum image_properties prop,
-                           void *image_data, void *args);
 
 /**
  * @brief Render a region with texture data.

@@ -1072,8 +1072,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 		// If the window is solid, or we enabled clipping for transparent windows,
 		// we add the window region to the ignored region
 		// Otherwise last_reg_ignore shouldn't change
-		if ((w->mode != WMODE_TRANS && !ps->o.force_win_blend) ||
-		    (ps->o.transparent_clipping && !w->transparent_clipping_excluded)) {
+		if ((w->mode != WMODE_TRANS && !ps->o.force_win_blend) || w->transparent_clipping) {
 			// w->mode == WMODE_SOLID or WMODE_FRAME_TRANS
 			region_t *tmp = rc_region_new();
 			if (w->mode == WMODE_SOLID) {
@@ -2190,24 +2189,25 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	      c2_list_postprocess(ps, ps->o.shadow_clip_list) &&
 	      c2_list_postprocess(ps, ps->o.fade_blacklist) &&
 	      c2_list_postprocess(ps, ps->o.blur_background_blacklist) &&
-		  c2_list_postprocess(ps, ps->o.animation_blacklist) && // Kirill
+		  c2_list_postprocess(ps, ps->o.animation_blacklist) &&
 	      c2_list_postprocess(ps, ps->o.invert_color_list) &&
 	      c2_list_postprocess(ps, ps->o.window_shader_fg_rules) &&
 	      c2_list_postprocess(ps, ps->o.opacity_rules) &&
-		  c2_list_postprocess(ps, ps->o.corners_rounding_rules) && // Kirill
+		  c2_list_postprocess(ps, ps->o.corners_rounding_rules) &&
 	      c2_list_postprocess(ps, ps->o.rounded_corners_blacklist) &&
-		  c2_list_postprocess(ps, ps->o.animating_rules_open) && // Kirill
-		  c2_list_postprocess(ps, ps->o.animating_rules_unmap) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_color_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_opacity_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_radius_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_offset_x_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_offset_y_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_deviation_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_size_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_strength_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_method_rules) && // Kirill
-	      c2_list_postprocess(ps, ps->o.focus_blacklist))) {
+		  c2_list_postprocess(ps, ps->o.animating_rules_open) && 
+		  c2_list_postprocess(ps, ps->o.animating_rules_unmap) && 
+		  c2_list_postprocess(ps, ps->o.shadow_color_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_opacity_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_radius_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_offset_x_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_offset_y_rules) &&
+		  c2_list_postprocess(ps, ps->o.blur_deviation_rules) &&
+		  c2_list_postprocess(ps, ps->o.blur_size_rules) && 
+		  c2_list_postprocess(ps, ps->o.blur_strength_rules) &&
+		  c2_list_postprocess(ps, ps->o.blur_method_rules) && 
+	      c2_list_postprocess(ps, ps->o.focus_blacklist) &&
+		  c2_list_postprocess(ps, ps->o.transparent_clipping_blacklist) )) {
 		log_error("Post-processing of conditionals failed, some of your rules "
 		          "might not work");
 	}
@@ -2596,21 +2596,22 @@ static void session_destroy(session_t *ps) {
 	c2_list_free(&ps->o.opacity_rules, NULL);
 	c2_list_free(&ps->o.paint_blacklist, NULL);
 	c2_list_free(&ps->o.unredir_if_possible_blacklist, NULL);
-	c2_list_free(&ps->o.animation_blacklist, NULL); // Kirill
-	c2_list_free(&ps->o.corners_rounding_rules, NULL); // Kirill
+	c2_list_free(&ps->o.animation_blacklist, NULL);
+	c2_list_free(&ps->o.corners_rounding_rules, NULL);
 	c2_list_free(&ps->o.rounded_corners_blacklist, NULL);
-	c2_list_free(&ps->o.animating_rules_open, NULL); // Kirill
-	c2_list_free(&ps->o.animating_rules_unmap, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_color_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_opacity_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_radius_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_offset_x_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_offset_y_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_deviation_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_size_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_strength_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_method_rules, NULL); // Kirill
+	c2_list_free(&ps->o.animating_rules_open, NULL);
+	c2_list_free(&ps->o.animating_rules_unmap, NULL);
+	c2_list_free(&ps->o.shadow_color_rules, NULL); 
+	c2_list_free(&ps->o.shadow_opacity_rules, NULL); 
+	c2_list_free(&ps->o.shadow_radius_rules, NULL); 
+	c2_list_free(&ps->o.shadow_offset_x_rules, NULL); 
+	c2_list_free(&ps->o.shadow_offset_y_rules, NULL); 
+	c2_list_free(&ps->o.blur_deviation_rules, NULL); 
+	c2_list_free(&ps->o.blur_size_rules, NULL); 
+	c2_list_free(&ps->o.blur_strength_rules, NULL); 
+	c2_list_free(&ps->o.blur_method_rules, NULL); 
 	c2_list_free(&ps->o.window_shader_fg_rules, free);
+	c2_list_free(&ps->o.transparent_clipping_blacklist, NULL);
 
 	// Free tracked atom list
 	{

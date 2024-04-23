@@ -368,7 +368,7 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 		brightness = gl_average_texture_color(base, img);
 	}
 
-	auto win_shader = inner->shader;
+	auto win_shader = (gl_win_shader_t *)img->shader;
 	if (!win_shader) {
 		win_shader = gd->default_shader;
 	}
@@ -713,7 +713,9 @@ void gl_fill(backend_t *base, struct color c, const region_t *clip) {
 
 void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
 	auto tex = ccalloc(1, struct gl_texture);
-	auto img = default_new_backend_image(size.width, size.height);
+	auto img = ccalloc(1, struct backend_image);
+	default_init_backend_image(img, size.width, size.height);
+
 	tex->width = size.width;
 	tex->height = size.height;
 	tex->texture = gl_new_texture(GL_TEXTURE_2D);
@@ -1134,6 +1136,7 @@ void gl_present(backend_t *base, const region_t *region) {
 	}
 
 	glUseProgram(gd->present_prog);
+	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, gd->back_texture);
 
 	GLuint vao;
@@ -1173,18 +1176,6 @@ bool gl_image_op(backend_t *base, enum image_operations op, void *image_data,
 		break;
 	}
 
-	return true;
-}
-
-bool gl_set_image_property(backend_t *backend_data, enum image_properties prop,
-                           void *image_data, void *args) {
-	if (prop != IMAGE_PROPERTY_CUSTOM_SHADER) {
-		return default_set_image_property(backend_data, prop, image_data, args);
-	}
-
-	struct backend_image *img = image_data;
-	auto inner = (struct gl_texture *)img->inner;
-	inner->shader = args;
 	return true;
 }
 
@@ -1236,7 +1227,9 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	new_inner->texture = gl_new_texture(GL_TEXTURE_2D);
 	new_inner->has_alpha = inner->has_alpha;
 	new_inner->y_inverted = true;
-	auto new_img = default_new_backend_image(new_inner->width, new_inner->height);
+
+	auto new_img = ccalloc(1, struct backend_image);
+	default_init_backend_image(new_img, new_inner->width, new_inner->height);
 	new_img->inner = (struct backend_image_inner_base *)new_inner;
 	new_img->inner->refcount = 1;
 

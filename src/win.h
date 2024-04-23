@@ -155,6 +155,8 @@ struct managed_win {
 	bool pixmap_damaged;
 	/// Damage of the window.
 	xcb_damage_damage_t damage;
+	/// The damaged region of the window, in window local coordinates.
+	region_t damaged;
 	/// Paint info of the window.
 	paint_t paint;
 	/// bitmap for properties which needs to be updated
@@ -277,7 +279,7 @@ struct managed_win {
 	bool fade_excluded;
 
 	/// Whether transparent clipping is excluded by the rules.
-	bool transparent_clipping_excluded;
+	bool transparent_clipping;
 
 	// Frame-opacity-related members
 	/// Current window frame opacity. Affected by window opacity.
