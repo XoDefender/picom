@@ -994,6 +994,7 @@ void gl_deinit(struct gl_data *gd) {
  	glDeleteTextures(1, &gd->back_texture);
 
 	glDeleteFramebuffers(1, &gd->temp_fbo);
+	glDeleteFramebuffers(1, &gd->back_fbo);
 
 	gl_check_err();
 }
@@ -1346,7 +1347,7 @@ void *gl_shadow_from_mask(backend_t *base, void *mask_data,
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
 	                       new_inner->texture, 0);
-						   
+
 	glClearColor(0, 0, 0, 0);
 	glClear(GL_COLOR_BUFFER_BIT);
 
