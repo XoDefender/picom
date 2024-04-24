@@ -402,14 +402,20 @@ gl_blit_inner(backend_t *base, GLuint target_fbo, struct backend_blit_args *blit
 	}
 
 	glUniform1i(win_shader->uniform_mask_tex, 2);
-	if (blit_args->mask != NULL) {
+	if (blit_args->mask != NULL) 
+	{
 		glUniform2f(win_shader->uniform_mask_offset,
 		            (float)blit_args->mask->origin.x,
 		            (float)blit_args->mask->origin.y);
-		glUniform1i(win_shader->uniform_mask_inverted, blit_args->mask->inverted);
-		glUniform1f(win_shader->uniform_mask_corner_radius,
-		            (GLfloat)blit_args->mask->corner_radius);
-	} else {
+
+		if (mask_image != NULL) 
+		{
+			glUniform1i(win_shader->uniform_mask_inverted, blit_args->mask->inverted);
+			glUniform1f(win_shader->uniform_mask_corner_radius, (GLfloat)blit_args->mask->corner_radius);
+		}
+	} 
+	else 
+	{
 		glUniform1i(win_shader->uniform_mask_inverted, 0);
 		glUniform1f(win_shader->uniform_mask_corner_radius, 0);
 	}

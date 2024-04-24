@@ -113,6 +113,7 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) {
 	region_t reg_damage;
 	if (!ignore_damage) {
 		reg_damage = get_damage(ps, ps->o.monitor_repaint || !ps->o.use_damage);
+		ps->root_damaged = false;
 	} else {
 		pixman_region32_init(&reg_damage);
 		pixman_region32_copy(&reg_damage, &ps->screen_reg);

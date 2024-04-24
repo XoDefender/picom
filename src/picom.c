@@ -1196,6 +1196,8 @@ void root_damaged(session_t *ps) {
 				log_error("Failed to bind root back pixmap");
 			}
 		}
+		
+		ps->root_damaged = true;
 	}
 
 	// Mark screen damaged

@@ -249,6 +249,8 @@ typedef struct session {
 	region_t *damage;
 	/// The region damaged on the last paint.
 	region_t *damage_ring;
+	/// Whether the root image has been changed since last render
+	bool root_damaged;
 	/// Number of damage regions we track
 	int ndamage;
 	/// Whether all windows are currently redirected.
