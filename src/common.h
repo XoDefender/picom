@@ -254,6 +254,7 @@ typedef struct session {
 	// TODO(yshui) move render related fields into separate struct
 	/// Render planner
 	struct layout_manager *layout_manager;
+	struct renderer *renderer;
 	/// Render command builder
 	struct command_builder *command_builder;
 	/// Number of damage regions we track

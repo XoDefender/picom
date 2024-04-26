@@ -107,33 +107,6 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) {
 	log_trace("Time spent on sync fence: %" PRIu64 " us",
 	          after_sync_fence_us - paint_all_start_us);
 
-	layout_manager_append_layout(
-	    ps->layout_manager, &ps->window_stack,
-	    (struct geometry){.width = ps->root_width, .height = ps->root_height});
-		auto layout = layout_manager_layout(ps->layout_manager);
-		
-		command_builder_build(
-	    ps->command_builder, layout, ps->o.force_win_blend,
-	    ps->o.blur_background_frame, ps->o.inactive_dim_fixed, ps->o.max_brightness,
-	    ps->o.inactive_dim, &ps->shadow_exclude_reg, ps->xinerama_nscrs, ps->xinerama_scr_regs, ps->o.wintype_option);
-
-	{
-		auto layer = layout->layers - 1;
-		auto layer_end = &layout->commands[layout->first_layer_start];
-		auto end = &layout->commands[layout->number_of_commands];
-		log_trace("Desktop background");
-		for (auto i = layout->commands; i != end; i++) {
-			if (i == layer_end) {
-				layer += 1;
-				layer_end += layer->number_of_commands;
-				log_trace("Layer for window %#010x @ %#010x (%s)",
-				          layer->win->base.id, layer->win->client_win,
-				          layer->win->name);
-			}
-			log_backend_command(TRACE, *i);
-		}
-	}
-
 	// All painting will be limited to the damage, if _some_ of
 	// the paints bleed out of the damage region, it will destroy
 	// part of the image we want to reuse
@@ -578,6 +551,34 @@ static inline const char *render_command_source_name(enum backend_command_source
 	case BACKEND_COMMAND_SOURCE_SHADOW: return "shadow";
 	case BACKEND_COMMAND_SOURCE_BACKGROUND: return "background";
 	}
+}
+
+/// Execute a list of backend commands on the backend
+/// @param target     the image to render into
+/// @param root_image the image containing the desktop background
+bool backend_execute(struct backend_base *backend, image_handle target, unsigned ncmds,
+                     struct backend_command cmds[ncmds]) {
+	bool succeeded = true;
+	for (auto cmd = &cmds[0]; succeeded && cmd != &cmds[ncmds]; cmd++) {
+		switch (cmd->op) {
+		case BACKEND_COMMAND_BLIT:
+			succeeded =
+			    backend->ops->v2.blit(backend, cmd->origin, target, &cmd->blit);
+			break;
+		case BACKEND_COMMAND_COPY_AREA:
+			succeeded = backend->ops->v2.copy_area(backend, cmd->origin, target,
+			                                       cmd->copy_area.source_image,
+			                                       cmd->copy_area.region);
+			break;
+		case BACKEND_COMMAND_BLUR:
+			succeeded =
+			    backend->ops->v2.blur(backend, cmd->origin, target, &cmd->blur);
+			break;
+		case BACKEND_COMMAND_INVALID:
+		default: assert(false);
+		}
+	}
+	return succeeded;
 }
 
 void log_backend_command_(enum log_level level, const char *func,

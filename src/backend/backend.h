@@ -642,6 +642,9 @@ extern struct backend_operations *backend_list[];
 void paint_all_new(session_t *ps, struct managed_win *const t, bool ignore_damage)
     attr_nonnull(1);
 
+bool backend_execute(struct backend_base *backend, image_handle target, unsigned ncmds,
+                     struct backend_command cmds[ncmds]);
+
 	void log_backend_command_(enum log_level level, const char *func,
                           const struct backend_command *cmd);
 #define log_backend_command(level, cmd)                            

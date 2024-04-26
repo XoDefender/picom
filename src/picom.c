@@ -50,6 +50,7 @@
 #include "render.h"
 #include "renderer/command_builder.h"
 #include "renderer/layout.h"
+#include "renderer/renderer.h"
 #include "types.h"
 #include "utils.h"
 #include "win.h"
@@ -459,6 +460,10 @@ static void destroy_backend(session_t *ps) {
 		}
 
 		if (ps->backend_data) {
+			if (ps->renderer) {
+			renderer_free(ps->backend_data, ps->renderer);
+			ps->renderer = NULL;
+		}
 			// Unmapped windows could still have shadow images, but not pixmap
 			// images
 			assert(!w->win_image || w->state != WSTATE_UNMAPPED);
@@ -535,7 +540,7 @@ static bool initialize_blur(session_t *ps) {
 
 /// Init the backend and bind all the window pixmap to backend images
 static bool initialize_backend(session_t *ps) {
-	if (!ps->o.legacy_backends) {
+
 		assert(!ps->backend_data);
 		// Reinitialize win_data
 		assert(backend_list[ps->o.backend]);
@@ -546,6 +551,13 @@ static bool initialize_backend(session_t *ps) {
 			return false;
 		}
 		ps->backend_data->ops = backend_list[ps->o.backend];
+
+		if (!ps->o.legacy_backends) {
+				ps->renderer = renderer_new(ps->backend_data, ps->o.shadow_radius,
+		                            (struct color){.alpha = ps->o.shadow_opacity,
+		                                           .red = ps->o.shadow_red,
+		                                           .green = ps->o.shadow_green,
+		                                           .blue = ps->o.shadow_blue});
 
 		ps->shadow_context = ps->backend_data->ops->create_shadow_context(
 		    ps->backend_data, ps->o.shadow_radius);
