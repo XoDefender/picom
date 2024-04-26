@@ -229,7 +229,7 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) {
 		if (!w->mask_image && (w->bounding_shaped || w->corner_radius != 0)) {
 			if(!w->widthb) ++w->widthb;
 			if(!w->heightb) ++w->heightb;
-			win_bind_mask(ps->backend_data, w);
+			//win_bind_mask(ps->backend_data, w);
 		}
 
 		// The clip region for the current window, in global/target coordinates

@@ -415,16 +415,6 @@ static void destroy_session_contexts(session_t *ps)
 		ps->backend_data, ps->backend_blur_context);
 		ps->backend_blur_context = NULL;
 	}
-	if (ps->shadow_context)
-	{
-		ps->backend_data->ops->destroy_shadow_context(ps->backend_data, ps->shadow_context);
-		ps->shadow_context = NULL;
-	}
-	if (ps->shadow_context_active)
-	{
-		ps->backend_data->ops->destroy_shadow_context(ps->backend_data, ps->shadow_context_active);
-		ps->shadow_context_active = NULL;
-	}
 }
 
 static void destroy_win_contexts(session_t *ps, struct managed_win *w)
@@ -433,12 +423,6 @@ static void destroy_win_contexts(session_t *ps, struct managed_win *w)
 	{
 		ps->backend_data->ops->destroy_blur_context(ps->backend_data, w->blur_context);
 		w->blur_context = NULL;
-	}
-	if(w->shadow_context)
-	{
-		if(ps->o.legacy_backends) free_conv((conv *)w->shadow_context);
-		else ps->backend_data->ops->destroy_shadow_context(ps->backend_data, w->shadow_context);
-		w->shadow_context = NULL;
 	}
 	if(w->shadow_picture)
 	{
@@ -491,7 +475,7 @@ static void destroy_backend(session_t *ps) {
 	}
 
 	if (ps->backend_data && ps->root_image) {
-		ps->backend_data->ops->release_image(ps->backend_data, ps->root_image);
+		ps->backend_data->ops->v2.release_image(ps->backend_data, ps->root_image);
 		ps->root_image = NULL;
 	}
 
@@ -559,19 +543,10 @@ static bool initialize_backend(session_t *ps) {
 		                                           .green = ps->o.shadow_green,
 		                                           .blue = ps->o.shadow_blue});
 
-		ps->shadow_context = ps->backend_data->ops->create_shadow_context(
-		    ps->backend_data, ps->o.shadow_radius);
-		if (!ps->shadow_context) {
-			log_fatal("Failed to initialize shadow context, aborting...");
-			goto err;
-		}
-
-		ps->shadow_context_active = ps->backend_data->ops->create_shadow_context(
-		    ps->backend_data, ps->o.shadow_radius_active);
-		if (!ps->shadow_context_active) {
-			log_fatal("Failed to initialize shadow context for active windows, aborting...");
-			goto err;
-		}
+		// if (!ps->shadow_context_active) {
+		// 	log_fatal("Failed to initialize shadow context for active windows, aborting...");
+		// 	goto err;
+		// }
 
 		if (!initialize_blur(ps)) {
 			log_fatal("Failed to prepare for background blur, aborting...");
@@ -617,7 +592,6 @@ static bool initialize_backend(session_t *ps) {
 			ps->pending_updates = true;
 		}
 	}
-
 	// The old backends binds pixmap lazily, nothing to do here
 	return true;
 err:
@@ -751,6 +725,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 		ps->animation_time = now;
 
 	double delta_secs = (double)(now - ps->animation_time) / 1000;
+
 
 	// First, let's process fading, and animated shaders
 	// TODO(yshui) check if a window is fully obscured, and if we don't need to
@@ -1059,6 +1034,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 			          w->base.id, w->name);
 			to_paint = false;
 		}
+
 		// log_trace("%s %d %d %d", w->name, to_paint, w->opacity,
 		// w->paint_excluded);
 
@@ -1196,22 +1172,47 @@ void root_damaged(session_t *ps) {
 
 	if (ps->backend_data) {
 		if (ps->root_image) {
-			ps->backend_data->ops->release_image(ps->backend_data, ps->root_image);
+			ps->backend_data->ops->v2.release_image(ps->backend_data,
+			                                        ps->root_image);
 			ps->root_image = NULL;
 		}
 		auto pixmap = x_get_root_back_pixmap(ps->c, ps->root, ps->atoms);
 		if (pixmap != XCB_NONE) {
-			ps->root_image = ps->backend_data->ops->bind_pixmap(
-			    ps->backend_data, pixmap, x_get_visual_info(ps->c, ps->vis), false);
-			if (ps->root_image) {
-				ps->backend_data->ops->set_image_property(
-				    ps->backend_data, IMAGE_PROPERTY_EFFECTIVE_SIZE,
-				    ps->root_image, (int[]){ps->root_width, ps->root_height});
-			} else {
+			xcb_get_geometry_reply_t *r = xcb_get_geometry_reply(
+			    ps->c, xcb_get_geometry(ps->c, pixmap), NULL);
+			if (!r) {
+				goto err;
+			}
+
+			// We used to assume that pixmaps pointed by the root background
+			// pixmap atoms are owned by the root window and have the same
+			// depth and hence the same visual that we can use to bind them.
+			// However, some applications break this assumption, e.g. the
+			// Xfce's desktop manager xfdesktop that sets the _XROOTPMAP_ID
+			// atom to a pixmap owned by it that seems to always have 32 bpp
+			// depth when the common root window's depth is 24 bpp. So use the
+			// root window's visual only if the root background pixmap's depth
+			// matches the root window's depth. Otherwise, find a suitable
+			// visual for the root background pixmap's depth and use it.
+			//
+			// We can't obtain a suitable visual for the root background
+			// pixmap the same way as the win_bind_pixmap function because it
+			// requires a window and we have only a pixmap. We also can't not
+			// bind the root background pixmap in case of depth mismatch
+			// because some options rely on it's content, e.g.
+			// transparent-clipping.
+
+			free(r);
+
+			ps->root_image = ps->backend_data->ops->v2.bind_pixmap(
+			    ps->backend_data, pixmap, x_get_visual_info(ps->c, ps->vis));
+		
+
+			if (!ps->root_image) {
+			err:
 				log_error("Failed to bind root back pixmap");
 			}
 		}
-
 		ps->root_damaged = true;
 	}
 
@@ -1499,7 +1500,7 @@ uint8_t session_redirection_mode(session_t *ps) {
 		assert(!ps->o.legacy_backends);
 		return XCB_COMPOSITE_REDIRECT_AUTOMATIC;
 	}
-	if (!ps->o.legacy_backends && !backend_list[ps->o.backend]->present) {
+	if (!ps->o.legacy_backends && !backend_list[ps->o.backend]->v2.present) {
 		// if the backend doesn't render anything, we don't need to take over the
 		// screen.
 		return XCB_COMPOSITE_REDIRECT_AUTOMATIC;
@@ -1530,6 +1531,7 @@ static bool redirect_start(session_t *ps) {
 		return false;
 	}
 
+
 	x_sync(ps->c);
 
 	if (!initialize_backend(ps)) {
@@ -1539,11 +1541,13 @@ static bool redirect_start(session_t *ps) {
 	if (!ps->o.legacy_backends) {
 		assert(ps->backend_data);
 		ps->ndamage = ps->backend_data->ops->max_buffer_age;
+		
 		ps->layout_manager =
 		    layout_manager_new((unsigned)ps->backend_data->ops->max_buffer_age);
 	} else {
 		ps->ndamage = maximum_buffer_age(ps);
 	}
+
 	ps->damage_ring = ccalloc(ps->ndamage, region_t);
 	ps->damage = ps->damage_ring + ps->ndamage - 1;
 
@@ -1796,11 +1800,23 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 		static int paint = 0;
 
 		log_trace("Render start, frame %d", paint);
-		if (!ps->o.legacy_backends) {
-			paint_all_new(ps, bottom, false);
-		} else {
-			paint_all(ps, bottom, false);
-		}
+		uint64_t after_damage_us = 0;
+		auto now = get_time_timespec();
+			auto render_start_us =
+			    (uint64_t)now.tv_sec * 1000000UL + (uint64_t)now.tv_nsec / 1000;
+
+		bool succeeded = renderer_render(
+			    ps->renderer, ps->backend_data, ps->root_image, ps->layout_manager,
+			    ps->command_builder, ps->backend_blur_context, render_start_us,
+			    ps->o.use_damage, ps->o.monitor_repaint, ps->o.force_win_blend,
+			    ps->o.blur_background_frame, ps->o.inactive_dim_fixed,
+			    ps->o.max_brightness, ps->o.inactive_dim, &ps->shadow_exclude_reg, ps->xinerama_nscrs, ps->xinerama_scr_regs,
+			    ps->o.wintype_option, &after_damage_us);
+		// if (!ps->o.legacy_backends) {
+		// 	paint_all_new(ps, bottom, false);
+		// } else {
+		// 	paint_all(ps, bottom, false);
+		// }
 		log_trace("Render end");
 
 		ps->first_frame = false;
@@ -2388,7 +2404,7 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		log_info("The compositor is started in automatic redirection mode.");
 		assert(!ps->o.legacy_backends);
 
-		if (backend_list[ps->o.backend]->present) {
+		if (backend_list[ps->o.backend]->v2.present) {
 			// If the backend has `present`, we couldn't be in automatic
 			// redirection mode unless we are in debug mode.
 			assert(ps->o.debug_mode);
@@ -2425,14 +2441,6 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		if (gl_logger) {
 			log_info("Enabling gl string marker");
 			log_add_target_tls(gl_logger);
-		}
-	}
-
-	if (!ps->o.legacy_backends) {
-		if (ps->o.monitor_repaint && !backend_list[ps->o.backend]->fill) {
-			log_warn("--monitor-repaint is not supported by the backend, "
-			         "disabling");
-			ps->o.monitor_repaint = false;
 		}
 	}
 

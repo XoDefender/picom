@@ -24,7 +24,6 @@
 
 #include "backend/backend.h"
 #include "backend/backend_common.h"
-#include "backend/compat.h"
 #include "backend/gl/gl_common.h"
 #include "backend/gl/glx.h"
 #include "common.h"
@@ -232,8 +231,9 @@ static backend_t *glx_init(session_t *ps, xcb_window_t target) {
 	bool success = false;
 	glxext_init(ps->dpy, ps->scr);
 	auto gd = ccalloc(1, struct _glx_data);
-	init_backend_base(&gd->gl.compat.base, ps);
-	gd->gl.compat.base.ops = &glx_ops;
+
+	init_backend_base(&gd->gl.base, ps);
+	gd->gl.base.ops = &glx_ops;
 
 	gd->target_win = target;
 
@@ -359,23 +359,25 @@ end:
 	}
 
 	if (!success) {
-		glx_deinit(&gd->gl.compat.base);
+		glx_deinit(&gd->gl.base);
 		return NULL;
 	}
 
-	return &gd->gl.compat.base;
+	return &gd->gl.base;
 }
 
 static image_handle
 glx_bind_pixmap(backend_t *base, xcb_pixmap_t pixmap, struct xvisual_info fmt) {
 	GLXPixmap *glxpixmap = NULL;
 	auto gd = (struct _glx_data *)base;
+
 	// Retrieve pixmap parameters, if they aren't provided
 	if (fmt.visual_depth > OPENGL_MAX_DEPTH) {
 		log_error("Requested depth %d higher than max possible depth %d.",
 		          fmt.visual_depth, OPENGL_MAX_DEPTH);
 		return NULL;
 	}
+
 
 	if (fmt.visual_depth < 0) {
 		log_error("Pixmap %#010x with invalid depth %d", pixmap, fmt.visual_depth);
@@ -384,6 +386,8 @@ glx_bind_pixmap(backend_t *base, xcb_pixmap_t pixmap, struct xvisual_info fmt) {
 
 	auto r =
 	    xcb_get_geometry_reply(base->c, xcb_get_geometry(base->c, pixmap), NULL);
+
+	
 	if (!r) {
 		log_error("Invalid pixmap %#010x", pixmap);
 		return NULL;
@@ -391,14 +395,11 @@ glx_bind_pixmap(backend_t *base, xcb_pixmap_t pixmap, struct xvisual_info fmt) {
 
 	log_trace("Binding pixmap %#010x", pixmap);
 	auto inner = ccalloc(1, struct gl_texture);
-		backend_compat_image_init(&inner->compat, BACKEND_IMAGE_FORMAT_PIXMAP,
-	                          (struct geometry){
-	                              .width = r->width,
-	                              .height = r->height,
-	                          });
-	inner->compat.base.has_alpha = fmt.alpha_size > 0;
+
 	inner->width = r->width;
 	inner->height = r->height;
+	inner->format = BACKEND_IMAGE_FORMAT_PIXMAP;
+
 	free(r);
 
 	struct glx_fbconfig_cache *cached_fbconfig = NULL;
@@ -547,23 +548,15 @@ struct backend_operations glx_ops = {
     .init = glx_init,
     .deinit = glx_deinit,
     .root_change = gl_root_change,
-    .bind_pixmap = backend_compat_bind_pixmap,
-    .release_image = backend_compat_release_image,
+
     .prepare = gl_prepare,
-    .compose = backend_compat_compose,
-    .image_op = backend_compat_image_op,
+
     .set_image_property = default_set_image_property,
     .clone_image = default_clone_image,
-    .blur = backend_compat_blur,
-    .is_image_transparent = default_is_image_transparent,
-    .present = backend_compat_present,
     .buffer_age = glx_buffer_age,
-    .create_shadow_context = backend_compat_create_shadow_context,
-    .destroy_shadow_context = backend_compat_destroy_shadow_context,
+
     .render_shadow = backend_render_shadow_from_mask,
-    .shadow_from_mask = backend_compat_shadow_from_mask,
-    .make_mask = backend_compat_make_mask,
-    .fill = backend_compat_fill,
+
     .create_blur_context = gl_create_blur_context,
     .destroy_blur_context = gl_destroy_blur_context,
     .get_blur_size = gl_get_blur_size,

@@ -29,7 +29,7 @@ struct renderer {
 	struct color shadow_color;
 	int shadow_radius;
 	void *shadow_blur_context;
-	struct backend_shadow_context *common_shadow_context;
+	struct conv *shadow_kernel;
 };
 
 void renderer_free(struct backend_base *backend, struct renderer *r) {
@@ -48,8 +48,8 @@ void renderer_free(struct backend_base *backend, struct renderer *r) {
 	if (r->shadow_blur_context) {
 		backend->ops->destroy_blur_context(backend, r->shadow_blur_context);
 	}
-	if (r->common_shadow_context) {
-		default_destroy_shadow_context(backend, r->common_shadow_context);
+	if (r->shadow_kernel) {
+		free_conv(r->shadow_kernel);
 	}
 	if (r->shadow_pixel) {
 		xcb_render_free_picture(backend->c, r->shadow_pixel);
@@ -99,9 +99,8 @@ renderer_init(struct renderer *renderer, struct backend_base *backend,
 			log_error("Failed to create shadow pixel");
 			return false;
 		}
-		renderer->common_shadow_context =
-		    default_create_shadow_context(NULL, renderer->shadow_radius);
-		if (!renderer->common_shadow_context) {
+		renderer->shadow_kernel = gaussian_kernel_autodetect_deviation(shadow_radius);
+		if (!renderer->shadow_kernel) {
 			log_error("Failed to create common shadow context");
 			return false;
 		}
@@ -484,7 +483,7 @@ bool renderer_render(struct renderer *r, struct backend_base *backend,
 		backend->ops->v2.blit(backend, (struct coord){}, r->back_image, &blit);
 	}
 
-	if (backend->ops->present) {
+	if (backend->ops->v2.present) {
 		backend->ops->v2.copy_area_quantize(backend, (struct coord){},
 		                                    backend->ops->v2.back_buffer(backend),
 		                                    r->back_image, &draw_region);

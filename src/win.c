@@ -370,7 +370,7 @@ static inline void win_release_pixmap(backend_t *base, struct managed_win *w) {
 	log_debug("Releasing pixmap of window %#010x (%s)", w->base.id, w->name);
 	assert(w->win_image);
 	if (w->win_image) {
-		base->ops->release_image(base, w->win_image);
+		base->ops->v2.release_image(base, w->win_image);
 		w->win_image = NULL;
 		// Bypassing win_set_flags, because `w` might have been destroyed
 		w->flags |= WIN_FLAGS_PIXMAP_NONE;
@@ -380,7 +380,7 @@ static inline void win_release_shadow(backend_t *base, struct managed_win *w) {
 	log_debug("Releasing shadow of window %#010x (%s)", w->base.id, w->name);
 	assert(w->shadow_image);
 	if (w->shadow_image) {
-		base->ops->release_image(base, w->shadow_image);
+		base->ops->v2.release_image(base, w->shadow_image);
 		w->shadow_image = NULL;
 		// Bypassing win_set_flags, because `w` might have been destroyed
 		w->flags |= WIN_FLAGS_SHADOW_NONE;
@@ -389,7 +389,7 @@ static inline void win_release_shadow(backend_t *base, struct managed_win *w) {
 
 static inline void win_release_mask(backend_t *base, struct managed_win *w) {
 	if (w->mask_image) {
-		base->ops->release_image(base, w->mask_image);
+		base->ops->v2.release_image(base, w->mask_image);
 		w->mask_image = NULL;
 	}
 }
@@ -407,7 +407,7 @@ static inline bool win_bind_pixmap(struct backend_base *b, struct managed_win *w
 	}
 	log_debug("New named pixmap for %#010x (%s) : %#010x", w->base.id, w->name, pixmap);
 	w->win_image =
-	    b->ops->bind_pixmap(b, pixmap, x_get_visual_info(b->c, w->a.visual), true);
+	    b->ops->v2.bind_pixmap(b, pixmap, x_get_visual_info(b->c, w->a.visual));
 	if (!w->win_image) {
 		log_error("Failed to bind pixmap");
 		win_set_flags(w, WIN_FLAGS_IMAGE_ERROR);
@@ -415,48 +415,6 @@ static inline bool win_bind_pixmap(struct backend_base *b, struct managed_win *w
 	}
 
 	win_clear_flags(w, WIN_FLAGS_PIXMAP_NONE);
-	return true;
-}
-
-bool win_bind_mask(struct backend_base *b, struct managed_win *w) {
-	assert(!w->mask_image);
-	auto reg_bound_local = win_get_bounding_shape_global_by_val(w);
-	pixman_region32_translate(&reg_bound_local, -w->g.x, -w->g.y);
-	w->mask_image = b->ops->make_mask(
-	    b, (geometry_t){.width = w->widthb, .height = w->heightb}, &reg_bound_local);
-	pixman_region32_fini(&reg_bound_local);
-
-	if (!w->mask_image) {
-		return false;
-	}
-	b->ops->set_image_property(b, IMAGE_PROPERTY_CORNER_RADIUS, w->mask_image,
-	                           (double[]){w->corner_radius});
-	return true;
-}
-
-bool win_bind_shadow(struct backend_base *b, struct managed_win *w, struct color c,
-                     struct backend_shadow_context *sctx) {
-	assert(!w->shadow_image);
-	assert(w->shadow);
-	if ((w->corner_radius == 0 && w->bounding_shaped == false) ||
-	    b->ops->shadow_from_mask == NULL) {
-		w->shadow_image = b->ops->render_shadow(b, w->widthb, w->heightb, sctx, c);
-	} else {
-		win_bind_mask(b, w);
-		w->shadow_image = b->ops->shadow_from_mask(b, w->mask_image, sctx, c);
-	}
-	if (!w->shadow_image) {
-		log_error("Failed to bind shadow image, shadow will be disabled "
-		          "for "
-		          "%#010x (%s)",
-		          w->base.id, w->name);
-		win_set_flags(w, WIN_FLAGS_SHADOW_NONE);
-		w->shadow = false;
-		return false;
-	}
-
-	log_debug("New shadow for %#010x (%s)", w->base.id, w->name);
-	win_clear_flags(w, WIN_FLAGS_SHADOW_NONE);
 	return true;
 }
 
@@ -992,16 +950,16 @@ struct color win_get_shadow_color(session_t *ps, struct managed_win *w)
 }
 
 void win_process_image_flags(session_t *ps, struct managed_win *w) {
+		// Assert that the MAPPED flag is already handled.
 	assert(!win_check_flags_all(w, WIN_FLAGS_MAPPED));
 
-	if (w->state == WSTATE_UNMAPPED || w->state == WSTATE_DESTROYING ||
-	    w->state == WSTATE_UNMAPPING) {
+	if (w->state != WSTATE_MAPPED) {
 		// Flags of invisible windows are processed when they are mapped
 		return;
 	}
 
 	// Not a loop
-	while (win_check_flags_any(w, WIN_FLAGS_IMAGES_STALE) &&
+	while (win_check_flags_any(w, WIN_FLAGS_PIXMAP_STALE) &&
 	       !win_check_flags_all(w, WIN_FLAGS_IMAGE_ERROR)) {
 		// Image needs to be updated, update it.
 		if (!ps->backend_data) {
@@ -1014,7 +972,6 @@ void win_process_image_flags(session_t *ps, struct managed_win *w) {
 			// otherwise we won't be able to rebind pixmap after
 			// releasing it, yet we might still need the pixmap for
 			// rendering.
-			assert(w->state != WSTATE_UNMAPPING && w->state != WSTATE_DESTROYING);
 			if (!win_check_flags_all(w, WIN_FLAGS_PIXMAP_NONE)) {
 				// Must release images first, otherwise breaks
 				// NVIDIA driver
@@ -1023,24 +980,13 @@ void win_process_image_flags(session_t *ps, struct managed_win *w) {
 			win_bind_pixmap(ps->backend_data, w);
 		}
 
-		if (win_check_flags_all(w, WIN_FLAGS_SHADOW_STALE)) {
-			if (!win_check_flags_all(w, WIN_FLAGS_SHADOW_NONE)) {
-				win_release_shadow(ps->backend_data, w);
-			}
-			if (w->shadow) {
-				struct color clr = win_get_shadow_color(ps, w);
-				struct backend_shadow_context *shadow_context = win_get_shadow_context(ps, w);
-				win_bind_shadow(ps->backend_data, w, clr, shadow_context);
-			}
-		}
-
 		// break here, loop always run only once
 		break;
 	}
 
 	// Clear stale image flags
-	if (win_check_flags_any(w, WIN_FLAGS_IMAGES_STALE)) {
-		win_clear_flags(w, WIN_FLAGS_IMAGES_STALE);
+	if (win_check_flags_any(w, WIN_FLAGS_PIXMAP_STALE)) {
+		win_clear_flags(w, WIN_FLAGS_PIXMAP_STALE);
 	}
 }
 

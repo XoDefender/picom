@@ -367,7 +367,6 @@ void command_builder_build(struct command_builder *cb, struct layout *layout,
                            double max_brightness, double inactive_dim,
                            region_t *shadow_exclude, int nscreens, region_t *screens,
                            const struct win_option *wintype_options) {
-
 	unsigned ncmds = 1;
 	for (unsigned i = 0; i < layout->len; i++) {
 		auto layer = &layout->layers[i];
@@ -413,9 +412,11 @@ void command_builder_build(struct command_builder *cb, struct layout *layout,
 	cmd->op = BACKEND_COMMAND_COPY_AREA;
 	cmd->source = BACKEND_COMMAND_SOURCE_BACKGROUND;
 	cmd->origin = (struct coord){};
+
 	pixman_region32_reset(
 	    &cmd->mask.region,
 	    (rect_t[]){{.x1 = 0, .y1 = 0, .x2 = layout->size.width, .y2 = layout->size.height}});
+		
 	cmd->copy_area.region = &cmd->mask.region;
 	assert(cmd == list->commands);
 
