@@ -48,6 +48,7 @@
 #include "log.h"
 #include "region.h"
 #include "render.h"
+#include "renderer/layout.h"
 #include "types.h"
 #include "utils.h"
 #include "win.h"
@@ -1525,6 +1526,8 @@ static bool redirect_start(session_t *ps) {
 	if (!ps->o.legacy_backends) {
 		assert(ps->backend_data);
 		ps->ndamage = ps->backend_data->ops->max_buffer_age;
+		ps->layout_manager =
+		    layout_manager_new((unsigned)ps->backend_data->ops->max_buffer_age);
 	} else {
 		ps->ndamage = maximum_buffer_age(ps);
 	}
@@ -1575,6 +1578,11 @@ static void unredirect(session_t *ps) {
 	ps->ndamage = 0;
 	free(ps->damage_ring);
 	ps->damage_ring = ps->damage = NULL;
+
+	if (ps->layout_manager) {
+		layout_manager_free(ps->layout_manager);
+		ps->layout_manager = NULL;
+	}
 
 	// Must call XSync() here
 	x_sync(ps->c);

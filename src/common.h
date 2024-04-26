@@ -251,6 +251,9 @@ typedef struct session {
 	region_t *damage_ring;
 	/// Whether the root image has been changed since last render
 	bool root_damaged;
+	// TODO(yshui) move render related fields into separate struct
+	/// Render planner
+	struct layout_manager *layout_manager;
 	/// Number of damage regions we track
 	int ndamage;
 	/// Whether all windows are currently redirected.
