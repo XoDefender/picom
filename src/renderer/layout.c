@@ -68,7 +68,7 @@ layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometr
 
 	out_layer->opacity = w->opacity;
 	out_layer->blur_opacity = w->opacity / w->opacity_target;
-	
+
 	if (out_layer->opacity == 0) {
 		goto out;
 	}
@@ -232,6 +232,52 @@ void layout_manager_append_layout(struct layout_manager *lm, struct list_node* w
 	}
 }
 
-struct layout *layout_manager_layout(struct layout_manager *lm) {
-	return &lm->layouts[lm->current];
+struct layout *layout_manager_layout(struct layout_manager *lm, unsigned age) {
+	if (age >= lm->max_buffer_age) {
+		assert(false);
+		return NULL;
+	}
+	return &lm->layouts[(lm->current + lm->max_buffer_age - age) % lm->max_buffer_age];
+}
+
+void layout_manager_collect_window_damage(const struct layout_manager *lm, unsigned index,
+                                          unsigned buffer_age, region_t *damage) {
+	unsigned int curr = lm->current;
+	struct layer* layer = &lm->layouts[curr].layers[index];
+	for (unsigned i = 0; i < buffer_age; i++) {
+		pixman_region32_union(damage, damage, &layer->damaged);
+		curr = (curr + lm->max_buffer_age - 1) % lm->max_buffer_age;
+		assert(layer->prev_rank >= 0);
+		layer = &lm->layouts[curr].layers[layer->prev_rank];
+	}
+}
+
+unsigned layout_manager_max_buffer_age(const struct layout_manager *lm) {
+	return lm->max_buffer_age - 1;
+}
+
+int layer_prev_rank(struct layout_manager *lm, unsigned buffer_age, unsigned index_) {
+	int index = to_int_checked(index_);
+	unsigned layout = lm->current;
+	while (buffer_age--) {
+		index = lm->layouts[layout].layers[index].prev_rank;
+		if (index < 0) {
+			break;
+		}
+		layout = (layout + lm->max_buffer_age - 1) % lm->max_buffer_age;
+	}
+	return index;
+}
+
+int layer_next_rank(struct layout_manager *lm, unsigned buffer_age, unsigned index_) {
+	int index = to_int_checked(index_);
+	unsigned layout = (lm->current + lm->max_buffer_age - buffer_age) % lm->max_buffer_age;
+	while (buffer_age--) {
+		index = lm->layouts[layout].layers[index].next_rank;
+		if (index < 0) {
+			break;
+		}
+		layout = (layout + 1) % lm->max_buffer_age;
+	}
+	return index;
 }

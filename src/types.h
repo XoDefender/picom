@@ -6,6 +6,7 @@
 /// Some common types
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /// Enumeration type to represent switches.
 typedef enum {
@@ -39,3 +40,25 @@ typedef struct coord {
 
 #define MARGIN_INIT                                                                      \
 	{ 0, 0, 0, 0 }
+
+static inline struct coord coord_add(struct coord a, struct coord b) {
+	return (struct coord){
+	    .x = a.x + b.x,
+	    .y = a.y + b.y,
+	};
+}
+
+static inline struct coord coord_sub(struct coord a, struct coord b) {
+	return (struct coord){
+	    .x = a.x - b.x,
+	    .y = a.y - b.y,
+	};
+}
+
+static inline bool coord_eq(struct coord a, struct coord b) {
+	return a.x == b.x && a.y == b.y;
+}
+
+static inline struct coord coord_neg(struct coord a) {
+	return (struct coord){.x = -a.x, .y = -a.y};
+}
