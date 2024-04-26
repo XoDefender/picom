@@ -119,8 +119,7 @@ typedef struct image_handle {
 /// The mask is composed of both a mask region and a mask image. The resulting mask
 /// is the intersection of the two. The mask image can be modified by the `corner_radius`
 /// and `inverted` properties. Note these properties have no effect on the mask region.
-struct backend_mask 
-{
+struct backend_mask {
 	/// Mask image, can be NULL.
 	///
 	/// Mask image must be an image that was created with the
@@ -138,8 +137,7 @@ struct backend_mask
 	bool inverted;
 };
 
-struct backend_blur_args 
-{
+struct backend_blur_args {
 	/// The blur context
 	void *blur_context;
 	/// The mask for the blur operation, cannot be NULL.
@@ -150,8 +148,7 @@ struct backend_blur_args
 	double opacity;
 };
 
-struct backend_blit_args 
-{
+struct backend_blit_args {
 	/// Source image, can be NULL.
 	image_handle source_image;
 	/// Mask for the source image. Cannot be NULL.
@@ -174,13 +171,13 @@ struct backend_blit_args
 	int ewidth, eheight;
 	/// Border width of the source image. This is used with
 	/// `corner_radius` to create a border for the rounded corners.
+	/// Setting this has no effect if `corner_radius` is 0.
 	int border_width;
 	/// Whether the source image should be inverted.
 	bool color_inverted;
 };
 
-enum backend_image_format 
-{
+enum backend_image_format {
 	/// A format that can be used for normal rendering, and binding
 	/// X pixmaps.
 	/// Images created with `bind_pixmap` have this format automatically.
@@ -192,8 +189,7 @@ enum backend_image_format
 	BACKEND_IMAGE_FORMAT_MASK,
 };
 
-enum backend_image_capability 
-{
+enum backend_image_capability {
 	/// Image can be sampled from. This is required for `blit` and `blur` source
 	/// images. All images except the back buffer should have this capability.
 	/// Note that `copy_area` should work without this capability, this is so that
@@ -202,6 +198,47 @@ enum backend_image_capability
 	/// Image can be rendered to. This is required for target images of any operation.
 	/// All images except bound X pixmaps should have this capability.
 	BACKEND_IMAGE_CAP_DST = 1 << 1,
+};
+
+enum backend_command_op {
+	BACKEND_COMMAND_INVALID = -1,
+	BACKEND_COMMAND_BLIT,
+	BACKEND_COMMAND_BLUR,
+	BACKEND_COMMAND_COPY_AREA,
+};
+
+/// Symbolic references used as render command source images. The actual `image_handle`
+/// will later be filled in by the renderer using this symbolic reference.
+enum backend_command_source {
+	BACKEND_COMMAND_SOURCE_WINDOW,
+	BACKEND_COMMAND_SOURCE_SHADOW,
+	BACKEND_COMMAND_SOURCE_BACKGROUND,
+};
+
+// TODO(yshui) might need better names
+
+struct backend_command {
+	enum backend_command_op op;
+	struct coord origin;
+	enum backend_command_source source;
+	union {
+		struct {
+			struct backend_blit_args blit;
+			/// Region of the screen that will be covered by this blit
+			/// operations, in screen coordinates.
+			region_t opaque_region;
+		};
+		struct {
+			image_handle source_image;
+			const region_t *region;
+		} copy_area;
+		struct backend_blur_args blur;
+	};
+	/// Mask used for the operation. Note `copy_area` command uses this to store its
+	/// `region` argument.
+	struct backend_mask mask;
+	/// Whether renderer should fill in `mask.image`.
+	bool need_mask_image;
 };
 
 struct backend_ops_v2 {
@@ -604,3 +641,7 @@ extern struct backend_operations *backend_list[];
 
 void paint_all_new(session_t *ps, struct managed_win *const t, bool ignore_damage)
     attr_nonnull(1);
+
+	void log_backend_command_(enum log_level level, const char *func,
+                          const struct backend_command *cmd);
+#define log_backend_command(level, cmd)                            

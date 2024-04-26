@@ -3,13 +3,16 @@
 #include <stddef.h>
 #include <uthash.h>
 
+#include "command_builder.h"
+#include "common.h"
+
 #include "list.h"
 #include "region.h"
 #include "types.h"
 #include "utils.h"
 #include "win.h"
-
 #include "layout.h"
+
 struct layer_index {
 	UT_hash_handle hh;
 	struct layer_key key;
@@ -64,6 +67,8 @@ layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometr
 	}
 
 	out_layer->opacity = w->opacity;
+	out_layer->blur_opacity = w->opacity / w->opacity_target;
+	
 	if (out_layer->opacity == 0) {
 		goto out;
 	}
@@ -95,6 +100,7 @@ static void layout_deinit(struct layout *layout) {
 		pixman_region32_fini(&layout->layers[i].damaged);
 	}
 	free(layout->layers);
+	command_builder_command_list_free(layout->commands);
 	*layout = (struct layout){};
 }
 
@@ -149,6 +155,7 @@ void layout_manager_append_layout(struct layout_manager *lm, struct list_node* w
 	auto prev_layout = &lm->layouts[lm->current];
 	lm->current = (lm->current + 1) % lm->max_buffer_age;
 	auto layout = &lm->layouts[lm->current];
+	command_builder_command_list_free(layout->commands);
 
 	unsigned count = 0;
 	list_foreach(struct win, w, window_stack, stack_neighbour) {

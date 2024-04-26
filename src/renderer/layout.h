@@ -6,6 +6,7 @@
 #include <xcb/xproto.h>
 #include "region.h"
 #include "types.h"
+#include "backend/backend.h"
 
 struct layer_key {
 	/// Window generation, (see `struct wm::generation` for explanation of what a
@@ -38,6 +39,10 @@ struct layer {
 	struct geometry shadow_size;
 	/// Opacity of this window
 	float opacity;
+	float blur_opacity;
+
+	/// How many commands are needed to render this layer
+	unsigned number_of_commands;
 
 	/// Rank of this layer in the previous frame, -1 if this window
 	/// appears in this frame for the first time
@@ -71,6 +76,16 @@ struct layout {
 	unsigned capacity;
 	/// Layers as a flat array
 	struct layer *layers;
+
+	/// Number of commands in `commands`
+	unsigned number_of_commands;
+	/// Where does the commands for the bottom most layer start.
+	/// Any commands before that is for the desktop background.
+	unsigned first_layer_start;
+	/// Commands that are needed to render this layout. Commands
+	/// are recorded in the same order as the layers they correspond to. Each layer
+	/// can have 0 or more commands associated with it.
+	struct backend_command *commands;
 };
 
 struct render_plan {

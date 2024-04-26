@@ -9,6 +9,7 @@
 #include "config.h"
 #include "log.h"
 #include "region.h"
+#include "renderer/command_builder.h"
 #include "renderer/layout.h"
 #include "types.h"
 #include "win.h"
@@ -109,6 +110,29 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) {
 	layout_manager_append_layout(
 	    ps->layout_manager, &ps->window_stack,
 	    (struct geometry){.width = ps->root_width, .height = ps->root_height});
+		auto layout = layout_manager_layout(ps->layout_manager);
+		
+		command_builder_build(
+	    ps->command_builder, layout, ps->o.force_win_blend,
+	    ps->o.blur_background_frame, ps->o.inactive_dim_fixed, ps->o.max_brightness,
+	    ps->o.inactive_dim, &ps->shadow_exclude_reg, ps->xinerama_nscrs, ps->xinerama_scr_regs, ps->o.wintype_option);
+
+	{
+		auto layer = layout->layers - 1;
+		auto layer_end = &layout->commands[layout->first_layer_start];
+		auto end = &layout->commands[layout->number_of_commands];
+		log_trace("Desktop background");
+		for (auto i = layout->commands; i != end; i++) {
+			if (i == layer_end) {
+				layer += 1;
+				layer_end += layer->number_of_commands;
+				log_trace("Layer for window %#010x @ %#010x (%s)",
+				          layer->win->base.id, layer->win->client_win,
+				          layer->win->name);
+			}
+			log_backend_command(TRACE, *i);
+		}
+	}
 
 	// All painting will be limited to the damage, if _some_ of
 	// the paints bleed out of the damage region, it will destroy
@@ -546,6 +570,55 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) {
 	for (win *w = t; w; w = w->prev_trans)
 		log_trace(" %#010lx", w->id);
 #endif
+}
+
+static inline const char *render_command_source_name(enum backend_command_source source) {
+	switch (source) {
+	case BACKEND_COMMAND_SOURCE_WINDOW: return "window";
+	case BACKEND_COMMAND_SOURCE_SHADOW: return "shadow";
+	case BACKEND_COMMAND_SOURCE_BACKGROUND: return "background";
+	}
+}
+
+void log_backend_command_(enum log_level level, const char *func,
+                          const struct backend_command *cmd) {
+	if (level < log_get_level_tls()) {
+		return;
+	}
+
+	log_printf(tls_logger, level, func, "Render command: %p", cmd);
+	switch (cmd->op) {
+	case BACKEND_COMMAND_BLIT:
+		log_printf(tls_logger, level, func, "blit %s%s",
+		           render_command_source_name(cmd->source),
+		           cmd->need_mask_image ? ", with mask image" : "");
+		log_printf(tls_logger, level, func, "origin: %d,%d", cmd->origin.x,
+		           cmd->origin.y);
+		log_printf(tls_logger, level, func, "mask region:");
+		log_region_(level, func, &cmd->blit.mask->region);
+		log_printf(tls_logger, level, func, "opaque region:");
+		log_region_(level, func, &cmd->opaque_region);
+		break;
+	case BACKEND_COMMAND_COPY_AREA:
+		log_printf(tls_logger, level, func, "copy area from %s",
+		           render_command_source_name(cmd->source));
+		log_printf(tls_logger, level, func, "origin: %d,%d", cmd->origin.x,
+		           cmd->origin.y);
+		log_printf(tls_logger, level, func, "region:");
+		log_region_(level, func, cmd->copy_area.region);
+		break;
+	case BACKEND_COMMAND_BLUR:
+		log_printf(tls_logger, level, func, "blur%s",
+		           cmd->need_mask_image ? ", with mask image" : "");
+		log_printf(tls_logger, level, func, "origin: %d,%d", cmd->origin.x,
+		           cmd->origin.y);
+		log_printf(tls_logger, level, func, "mask region:");
+		log_region_(level, func, &cmd->blur.mask->region);
+		break;
+	case BACKEND_COMMAND_INVALID:
+		log_printf(tls_logger, level, func, "invalid");
+		break;
+	}
 }
 
 // vim: set noet sw=8 ts=8 :
