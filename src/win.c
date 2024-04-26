@@ -1825,7 +1825,7 @@ static void win_determine_blur_context(session_t *ps, struct managed_win *w) {
 	}
 	}
 
-	w->blur_context = ps->backend_data->ops->create_blur_context(ps->backend_data, method, args);
+	w->blur_context = ps->backend_data->ops->create_blur_context(ps->backend_data, method, BACKEND_IMAGE_FORMAT_MASK, args);
 }
 
 static bool win_need_update_blur_context(session_t *ps, struct managed_win *w)

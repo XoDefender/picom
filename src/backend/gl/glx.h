@@ -1,22 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) Yuxuan Shui <yshuiv7@gmail.com>
 #pragma once
-#include <stdbool.h>
-// Older version of glx.h defines function prototypes for these extensions...
-// Rename them to avoid conflicts
-#define glXSwapIntervalMESA glXSwapIntervalMESA_
-#define glXBindTexImageEXT glXBindTexImageEXT_
-#define glXReleaseTexImageEXT glXReleaseTexImageEXT
-#include <GL/glx.h>
-#undef glXSwapIntervalMESA
-#undef glXBindTexImageEXT
-#undef glXReleaseTexImageEXT
 #include <X11/Xlib.h>
-#include <xcb/xcb.h>
+#include <GL/glx.h>
+#include <stdbool.h>
 #include <xcb/render.h>
+#include <xcb/xcb.h>
 
-#include "log.h"
 #include "compiler.h"
+#include "log.h"
 #include "utils.h"
 #include "x.h"
 

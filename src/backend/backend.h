@@ -35,15 +35,6 @@ typedef struct backend_base {
 	// ...
 } backend_t;
 
-typedef struct geometry {
-	int width;
-	int height;
-} geometry_t;
-
-typedef struct coord {
-	int x, y;
-} coord_t;
-
 typedef void (*backend_ready_callback_t)(void *);
 
 // This mimics OpenGL's ARB_robustness extension, which enables detection of GPU context
@@ -213,11 +204,10 @@ enum backend_image_capability
 	BACKEND_IMAGE_CAP_DST = 1 << 1,
 };
 
-struct backend_ops_v2 
-{
+struct backend_ops_v2 {
 	/// Check if an optional image format is supported by the backend.
-	bool (*is_format_supported)(struct backend_base *backend_data, enum backend_image_format format) 
-		attr_nonnull(1);
+	bool (*is_format_supported)(struct backend_base *backend_data,
+	                            enum backend_image_format format) attr_nonnull(1);
 
 	/// Return the capabilities of an image.
 	uint32_t (*image_capabilities)(struct backend_base *backend_data, image_handle image)
@@ -230,8 +220,8 @@ struct backend_ops_v2
 	/// @param alpha        the alpha value to multiply
 	/// @param region       the region to apply the alpha, in the target image's
 	///                     coordinate.
-	bool (*apply_alpha)(struct backend_base *backend_data, image_handle target, double alpha, const region_t *region) 
-		attr_nonnull(1, 2, 4);
+	bool (*apply_alpha)(struct backend_base *backend_data, image_handle target,
+	                    double alpha, const region_t *region) attr_nonnull(1, 2, 4);
 
 	/// Copy pixels from a source image on to the target image.
 	///
@@ -247,8 +237,9 @@ struct backend_ops_v2
 	/// @param target       an image handle, cannot be NULL.
 	/// @param args         arguments for blit
 	/// @return             whether the operation is successful
-	bool (*blit)(struct backend_base *backend_data, struct coord origin, image_handle target, struct backend_blit_args *args) 
-		attr_nonnull(1, 3, 4);
+	bool (*blit)(struct backend_base *backend_data, struct coord origin,
+	             image_handle target, struct backend_blit_args *args)
+	    attr_nonnull(1, 3, 4);
 
 	/// Blur a given region of a source image and store the result in the
 	/// target image.
@@ -266,7 +257,8 @@ struct backend_ops_v2
 	/// @param target       an image handle, cannot be NULL.
 	/// @param args         argument for blur
 	/// @return             whether the operation is successful
-	bool (*blur)(struct backend_base *backend_data, struct coord origin, image_handle target, struct backend_blur_args *args)
+	bool (*blur)(struct backend_base *backend_data, struct coord origin,
+	             image_handle target, struct backend_blur_args *args)
 	    attr_nonnull(1, 3, 4);
 
 	/// Direct copy of pixels from a source image on to the target image.
@@ -283,7 +275,8 @@ struct backend_ops_v2
 	/// @param source       an image handle, cannot be NULL.
 	/// @param region       the region to copy, in the source image's coordinate.
 	/// @return             whether the operation is successful
-	bool (*copy_area)(struct backend_base *backend_data, struct coord origin, image_handle target, image_handle source, const region_t *region)
+	bool (*copy_area)(struct backend_base *backend_data, struct coord origin,
+	                  image_handle target, image_handle source, const region_t *region)
 	    attr_nonnull(1, 3, 4, 5);
 
 	/// Similar to `copy_area`, but is specialized for copying from a higher
@@ -305,8 +298,9 @@ struct backend_ops_v2
 	/// @param source       an image handle, cannot be NULL.
 	/// @param region       the region to copy, in the source image's coordinate.
 	/// @return             whether the operation is successful
-	bool (*copy_area_quantize)(struct backend_base *backend_data, struct coord origin, image_handle target, image_handle source, const region_t *region) 
-		attr_nonnull(1, 3, 4, 5);
+	bool (*copy_area_quantize)(struct backend_base *backend_data, struct coord origin,
+	                           image_handle target, image_handle source,
+	                           const region_t *region) attr_nonnull(1, 3, 4, 5);
 
 	/// Initialize an image with a given color value. If the image has a mask format,
 	/// only the alpha channel of the color is used.
@@ -315,15 +309,16 @@ struct backend_ops_v2
 	/// @param target       an image handle, cannot be NULL.
 	/// @param color        the color to fill the image with
 	/// @return             whether the operation is successful
-	bool (*clear)(struct backend_base *backend_data, image_handle target, struct color color) 
-		attr_nonnull(1, 2);
+	bool (*clear)(struct backend_base *backend_data, image_handle target,
+	              struct color color) attr_nonnull(1, 2);
 
 	/// Create a new, uninitialized image with the given format and size.
 	///
 	/// @param backend_data backend data
 	/// @param format       the format of the image
 	/// @param size         the size of the image
-	image_handle (*new_image)(struct backend_base *backend_data, enum backend_image_format format, geometry_t size)
+	image_handle (*new_image)(struct backend_base *backend_data,
+	                          enum backend_image_format format, geometry_t size)
 	    attr_nonnull(1);
 
 	/// Acquire the image handle of the back buffer.
@@ -338,8 +333,8 @@ struct backend_ops_v2
 	/// @param fmt          information of the pixmap's visual
 	/// @return             backend specific image handle for the pixmap. May be
 	///                     NULL.
-	image_handle (*bind_pixmap)(struct backend_base *backend_data, xcb_pixmap_t pixmap, struct xvisual_info fmt) 
-		attr_nonnull(1);
+	image_handle (*bind_pixmap)(struct backend_base *backend_data, xcb_pixmap_t pixmap,
+	                            struct xvisual_info fmt) attr_nonnull(1);
 
 	/// Free resources associated with an image data structure. Releasing the image
 	/// returned by `back_buffer` should be a no-op.
@@ -347,14 +342,13 @@ struct backend_ops_v2
 	/// @param image the image to be released, cannot be NULL.
 	/// @return if this image is created by `bind_pixmap`, the X pixmap; 0
 	///         otherwise.
-	void (*release_image)(struct backend_base *backend_data, image_handle image)
+	xcb_pixmap_t (*release_image)(struct backend_base *backend_data, image_handle image)
 	    attr_nonnull(1, 2);
 
 	/// Present the back buffer to the target window. Ideally the backend should keep
 	/// track of the region of the back buffer that has been updated, and use relevant
 	/// mechanism (when possible) to present only the updated region.
-	bool (*present)(struct backend_base *backend_data) 
-		attr_nonnull(1);
+	bool (*present)(struct backend_base *backend_data) attr_nonnull(1);
 };
 
 struct backend_operations {
@@ -582,8 +576,9 @@ struct backend_operations {
 	void *(*clone_image)(backend_t *base, const void *image_data,
 	                     const region_t *reg_visible);
 
-	/// Create a blur context that can be used to call `blur`
-	void *(*create_blur_context)(backend_t *base, enum blur_method, void *args);
+	/// Create a blur context that can be used to call `blur` for images with a
+	/// specific format.
+	void *(*create_blur_context)(backend_t *base, enum blur_method, enum backend_image_format format, void *args);
 	/// Destroy a blur context
 	void (*destroy_blur_context)(backend_t *base, void *ctx);
 	/// Get how many pixels outside of the blur area is needed for blur

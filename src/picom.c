@@ -527,7 +527,7 @@ static bool initialize_blur(session_t *ps) {
 	}
 
 	ps->backend_blur_context = ps->backend_data->ops->create_blur_context(
-	    ps->backend_data, ps->o.blur_method, args);
+	    ps->backend_data, ps->o.blur_method, BACKEND_IMAGE_FORMAT_MASK, args);
 	return ps->backend_blur_context != NULL;
 }
 
