@@ -332,35 +332,13 @@ static GLuint gl_average_texture_color(backend_t *base, struct gl_texture *img)
 	return result_texture;
 }
 
-/**
- * Render a region with texture data.
- *
- * @param ptex the texture
- * @param target_texture the texture to render into
- * @param blit_args arguments for the blit
- * @param coord GL vertices
- * @param indices GL indices
- * @param nrects number of rectangles to render
- */
 static void
-gl_blit_inner(backend_t *base, GLuint target_fbo, struct backend_blit_args *blit_args,
-              GLint *coord, GLuint *indices, int nrects) {
-	// FIXME(yshui) breaks when `mask` and `img` doesn't have the same y_inverted
-	//              value. but we don't ever hit this problem because all of our
-	//              images and masks are y_inverted.
-	auto gd = (struct gl_data *)base;
-	auto img = (struct gl_texture *)blit_args->source_image;
-	auto mask_image = blit_args->mask ? (struct gl_texture *)blit_args->mask->image : NULL;
-	auto mask_texture = mask_image ? mask_image->texture : gd->default_mask_texture;
-
-	GLuint brightness = 0;
-	if (blit_args->max_brightness < 1.0) {
-		brightness = gl_average_texture_color(base, img);
-	}
-
+gl_set_uniforms(struct backend_blit_args *blit_args, struct gl_texture *mask_image)
+{
 	auto win_shader = (gl_win_shader_t *)blit_args->shader;
 	assert(win_shader);
 	assert(win_shader->prog);
+
 	glUseProgram(win_shader->prog);
 	if (win_shader->uniform_opacity >= 0) {
 		glUniform1f(win_shader->uniform_opacity, (float)blit_args->opacity);
@@ -416,18 +394,38 @@ gl_blit_inner(backend_t *base, GLuint target_fbo, struct backend_blit_args *blit
 		glUniform1i(win_shader->uniform_mask_inverted, 0);
 		glUniform1f(win_shader->uniform_mask_corner_radius, 0);
 	}
+}
 
-	glActiveTexture(GL_TEXTURE2);
-	glBindTexture(GL_TEXTURE_2D, mask_texture);
+/**
+ * Render a region with texture data.
+ *
+ * @param target_fbo   the FBO to render into
+ * @param blit_args arguments for the blit
+ * @param coord GL vertices
+ * @param indices GL indices
+ * @param nrects number of rectangles to render
+ */
+static void
+gl_blit_inner(backend_t *base, GLuint target_fbo, struct backend_blit_args *blit_args,
+              GLint *coord, GLuint *indices, int nrects) {
+	// FIXME(yshui) breaks when `mask` and `img` doesn't have the same y_inverted
+	//              value. but we don't ever hit this problem because all of our
+	//              images and masks are y_inverted.
+	auto gd = (struct gl_data *)base;
+	auto img = (struct gl_texture *)blit_args->source_image;
+	auto mask_image = blit_args->mask ? (struct gl_texture *)blit_args->mask->image : NULL;
+	auto mask_texture = mask_image ? mask_image->texture : gd->default_mask_texture;
+	GLuint brightness = blit_args->max_brightness < 1.0 ? gl_average_texture_color(base, img) : 0;
 
-	// log_trace("Draw: %d, %d, %d, %d -> %d, %d (%d, %d) z %d\n",
-	//          x, y, width, height, dx, dy, ptex->width, ptex->height, z);
+	gl_set_uniforms(blit_args, mask_image);
 
 	// Bind texture
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, brightness);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, img->texture);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, brightness);
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, mask_texture);
 
 	GLuint vao;
 	glGenVertexArrays(1, &vao);
@@ -1227,7 +1225,8 @@ struct backend_shadow_context *gl_create_shadow_context(backend_t *base, double 
 	return (struct backend_shadow_context *)ctx;
 }
 
-void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shadow_context *ctx) {
+void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shadow_context *ctx) 
+{
 	auto ctx_ = (struct gl_shadow_context *)ctx;
 	if (ctx_->blur_context) {
 		gl_destroy_blur_context(base, (struct backend_blur_context *)ctx_->blur_context);
@@ -1235,8 +1234,8 @@ void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shado
 	free(ctx_);
 }
 
-void *gl_shadow_from_mask(backend_t *base, void *mask_data,
-                          struct backend_shadow_context *sctx, struct color color) {
+void *gl_shadow_from_mask(backend_t *base, void *mask_data, struct backend_shadow_context *sctx, struct color color) 
+{
 	log_debug("Create shadow from mask");
 	auto gd = (struct gl_data *)base;
 	auto mask = (struct backend_image *)mask_data;
@@ -1331,7 +1330,7 @@ void *gl_shadow_from_mask(backend_t *base, void *mask_data,
 		// gl_blur expects reg_blur to be in X coordinate system (i.e. y flipped),
 		// but we are covering the whole texture so we don't need to worry about
 		// that.
-		gl_blur_impl(
+		gl_blur_inner(
 		    1.0, gsctx->blur_context, NULL, (coord_t){0}, &reg_blur, NULL,
 		    source_texture,
 		    (geometry_t){.width = new_inner->width, .height = new_inner->height},

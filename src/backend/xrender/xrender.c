@@ -214,7 +214,7 @@ static xcb_render_picture_t process_mask(struct _xrender_data *xd, struct xrende
 }
 
 static void
-compose_impl(struct _xrender_data *xd, struct xrender_image *xrimg, coord_t dst,
+compose_inner(struct _xrender_data *xd, struct xrender_image *xrimg, coord_t dst,
              struct xrender_image *mask, coord_t mask_dst, const region_t *reg_paint,
              const region_t *reg_visible, xcb_render_picture_t result) {
 	const struct backend_image *img = &xrimg->base;
@@ -357,7 +357,7 @@ compose_impl(struct _xrender_data *xd, struct xrender_image *xrimg, coord_t dst,
 static void compose(backend_t *base, void *img_data, coord_t dst, void *mask, coord_t mask_dst,
                     const region_t *reg_paint, const region_t *reg_visible, bool lerp attr_unused) {
 	struct _xrender_data *xd = (void *)base;
-	return compose_impl(xd, img_data, dst, mask, mask_dst, reg_paint, reg_visible,
+	return compose_inner(xd, img_data, dst, mask, mask_dst, reg_paint, reg_visible,
 	                    xd->back[2]);
 }
 

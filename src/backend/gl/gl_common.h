@@ -162,7 +162,7 @@ void *gl_clone(backend_t *base, const void *image_data, const region_t *reg_visi
 
 bool gl_blur(backend_t *base, double opacity, void *ctx, void *mask, coord_t mask_dst,
              const region_t *reg_blur, const region_t *reg_visible);
-bool gl_blur_impl(double opacity, struct gl_blur_context *bctx, void *mask,
+bool gl_blur_inner(double opacity, struct gl_blur_context *bctx, void *mask,
                   coord_t mask_dst, const region_t *reg_blur,
                   const region_t *reg_visible attr_unused, GLuint source_texture,
                   geometry_t source_size, GLuint target_fbo, GLuint default_mask);
