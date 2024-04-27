@@ -235,7 +235,7 @@ static backend_t *glx_init(session_t *ps, xcb_window_t target) {
 	init_backend_base(&gd->gl.base, ps);
 	gd->gl.base.ops = &glx_ops;
 
-	gd->target_win = target;
+	gd->target_win = ps->overlay;
 
 	XVisualInfo *pvis = NULL;
 

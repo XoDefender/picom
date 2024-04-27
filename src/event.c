@@ -635,6 +635,8 @@ static inline void repair_win(session_t *ps, struct managed_win *w) {
 		win_extents(w, &parts);
 		set_ignore_cookie(
 		    ps, xcb_damage_subtract(ps->c, w->damage, XCB_NONE, XCB_NONE));
+			win_set_flags(w, WIN_FLAGS_PIXMAP_STALE);
+			ps->pending_updates = true;
 	} else {
 		set_ignore_cookie(
 		    ps, xcb_damage_subtract(ps->c, w->damage, XCB_NONE, ps->damaged_region));
