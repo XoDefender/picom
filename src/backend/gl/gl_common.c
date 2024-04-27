@@ -189,7 +189,7 @@ void gl_destroy_window_shader(backend_t *backend_data attr_unused, void *shader)
  * between each other on each render iteration.
  */
 static GLuint
-_gl_average_texture_color(backend_t *base, GLuint source_texture, GLuint destination_texture,
+gl_average_texture_color_inner(backend_t *base, GLuint source_texture, GLuint destination_texture,
                           GLuint auxiliary_texture, GLuint fbo, int width, int height) {
 	const int max_width = 1;
 	const int max_height = 1;
@@ -234,11 +234,8 @@ _gl_average_texture_color(backend_t *base, GLuint source_texture, GLuint destina
 	GLuint result;
 	if (to_width > max_width || to_height > max_height) {
 		GLuint new_source_texture = destination_texture;
-		GLuint new_destination_texture =
-		    auxiliary_texture != 0 ? auxiliary_texture : source_texture;
-		result = _gl_average_texture_color(base, new_source_texture,
-		                                   new_destination_texture, 0, fbo,
-		                                   to_width, to_height);
+		GLuint new_destination_texture = auxiliary_texture != 0 ? auxiliary_texture : source_texture;
+		result = gl_average_texture_color_inner(base, new_source_texture, new_destination_texture, 0, fbo, to_width, to_height);
 	} else {
 		result = destination_texture;
 	}
@@ -307,7 +304,7 @@ static GLuint gl_average_texture_color(backend_t *base, struct gl_texture *img)
 	             GL_STATIC_DRAW);
 
 	// Do actual recursive render to 1x1 texture
-	GLuint result_texture = _gl_average_texture_color(base, img->texture, img->auxiliary_texture[0], 
+	GLuint result_texture = gl_average_texture_color_inner(base, img->texture, img->auxiliary_texture[0], 
 													  img->auxiliary_texture[1], gd->temp_fbo, 
 													  img->width, img->height);
 
@@ -667,8 +664,8 @@ void gl_resize(struct gl_data *gd, int width, int height) {
 
 /// Fill a given region in bound framebuffer.
 /// @param[in] y_inverted whether the y coordinates in `clip` should be inverted
-static void _gl_fill(backend_t *base, struct color c, const region_t *clip, GLuint target,
-                     int height, bool y_inverted) {
+static void gl_fill_inner(backend_t *base, struct color c, const region_t *clip, GLuint target, int height, bool y_inverted) 
+{
 	static const GLuint fill_vert_in_coord_loc = 0;
 	int nrects;
 	const rect_t *rect = pixman_region32_rectangles((region_t *)clip, &nrects);
@@ -731,7 +728,7 @@ static void _gl_fill(backend_t *base, struct color c, const region_t *clip, GLui
 
 void gl_fill(backend_t *base, struct color c, const region_t *clip) {
 	auto gd = (struct gl_data *)base;
-	return _gl_fill(base, c, clip, gd->back_fbo, gd->height, true);
+	return gl_fill_inner(base, c, clip, gd->back_fbo, gd->height, true);
 }
 
 void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
@@ -763,7 +760,7 @@ void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
 	glClearColor(0, 0, 0, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	_gl_fill(base, (struct color){1, 1, 1, 1}, reg, gd->temp_fbo, size.height, false);
+	gl_fill_inner(base, (struct color){1, 1, 1, 1}, reg, gd->temp_fbo, size.height, false);
 
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1132,7 +1129,7 @@ static void gl_image_apply_alpha(backend_t *base, struct backend_image *img,
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, inner->texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
-	_gl_fill(base, (struct color){0, 0, 0, 0}, reg_op, gd->temp_fbo, inner->height, !inner->y_inverted);
+	gl_fill_inner(base, (struct color){0, 0, 0, 0}, reg_op, gd->temp_fbo, inner->height, !inner->y_inverted);
 
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
