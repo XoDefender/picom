@@ -180,6 +180,18 @@ void gl_present(backend_t *base, const region_t *);
 bool gl_read_pixel(backend_t *base, void *image_data, int x, int y, struct color *output);
 enum device_status gl_device_status(backend_t *base);
 
+/// Convert a mask formed by a collection of rectangles to OpenGL vertex and texture
+/// coordinates.
+///
+/// @param[in]  origin      origin of the source image in target coordinates
+/// @param[in]  mask_origin origin of the mask in source coordinates
+/// @param[in]  nrects      number of rectangles
+/// @param[in]  rects       mask rectangles, in mask coordinates
+/// @param[out] coord       OpenGL vertex coordinates, suitable for creating VAO/VBO
+/// @param[out] indices     OpenGL vertex indices, suitable for creating VAO/VBO
+void gl_mask_rects_to_coords(struct coord origin, struct coord mask_origin, int nrects,
+                             const rect_t *rects, GLint *coord, GLuint *indices);
+
 /**
  * Get a textual representation of an OpenGL error.
  */

@@ -333,7 +333,7 @@ static GLuint gl_average_texture_color(backend_t *base, struct gl_texture *img)
 }
 
 static void
-gl_set_uniforms(struct backend_blit_args *blit_args, struct gl_texture *mask_image)
+gl_set_win_shader_uniforms(struct backend_blit_args *blit_args, struct gl_texture *mask_image)
 {
 	auto win_shader = (gl_win_shader_t *)blit_args->shader;
 	assert(win_shader);
@@ -417,7 +417,7 @@ gl_blit_inner(backend_t *base, GLuint target_fbo, struct backend_blit_args *blit
 	auto mask_texture = mask_image ? mask_image->texture : gd->default_mask_texture;
 	GLuint brightness = blit_args->max_brightness < 1.0 ? gl_average_texture_color(base, img) : 0;
 
-	gl_set_uniforms(blit_args, mask_image);
+	gl_set_win_shader_uniforms(blit_args, mask_image);
 
 	// Bind texture
 	glActiveTexture(GL_TEXTURE0);
@@ -524,6 +524,34 @@ void x_rect_to_coords(int nrects, const rect_t *rects, coord_t image_dst,
 		           {texture_x2, texture_y2},
 		           {vx1, vy2},
 		           {texture_x1, texture_y2},
+		       }),
+		       sizeof(GLint[2]) * 8);
+
+		GLuint u = (GLuint)(i * 4);
+		memcpy(&indices[i * 6],
+		       ((GLuint[]){u + 0, u + 1, u + 2, u + 2, u + 3, u + 0}),
+		       sizeof(GLuint) * 6);
+	}
+}
+
+void gl_mask_rects_to_coords(struct coord origin, struct coord mask_origin, int nrects,
+                             const rect_t *rects, GLint *coord, GLuint *indices) {
+	for (ptrdiff_t i = 0; i < nrects; i++) {
+		// Rectangle in source image coordinates
+		rect_t rect_src = region_translate_rect(rects[i], mask_origin);
+		// Rectangle in target image coordinates
+		rect_t rect_dst = region_translate_rect(rect_src, origin);
+
+		memcpy(&coord[i * 16],
+		       ((GLint[][2]){
+		           {rect_dst.x1, rect_dst.y1},        // Vertex, bottom-left
+		           {rect_src.x1, rect_src.y1},        // Texture
+		           {rect_dst.x2, rect_dst.y1},        // Vertex, bottom-right
+		           {rect_src.x2, rect_src.y1},        // Texture
+		           {rect_dst.x2, rect_dst.y2},        // Vertex, top-right
+		           {rect_src.x2, rect_src.y2},        // Texture
+		           {rect_dst.x1, rect_dst.y2},        // Vertex, top-left
+		           {rect_src.x1, rect_src.y2},        // Texture
 		       }),
 		       sizeof(GLint[2]) * 8);
 
@@ -662,12 +690,15 @@ void gl_resize(struct gl_data *gd, int width, int height) {
 
 /// Fill a given region in bound framebuffer.
 /// @param[in] y_inverted whether the y coordinates in `clip` should be inverted
-static void gl_fill_inner(backend_t *base, struct color c, const region_t *clip, GLuint target, int height, bool y_inverted) 
+static void gl_fill_inner(backend_t *base, struct color c, const region_t *clip, GLuint target) 
 {
 	static const GLuint fill_vert_in_coord_loc = 0;
 	int nrects;
 	const rect_t *rect = pixman_region32_rectangles((region_t *)clip, &nrects);
 	auto gd = (struct gl_data *)base;
+
+	glUseProgram(gd->fill_shader.prog);
+	glUniform4f(gd->fill_shader.color_loc, (GLfloat)c.red, (GLfloat)c.green, (GLfloat)c.blue, (GLfloat)c.alpha);
 
 	GLuint vao;
 	glGenVertexArrays(1, &vao);
@@ -675,38 +706,20 @@ static void gl_fill_inner(backend_t *base, struct color c, const region_t *clip,
 
 	GLuint bo[2];
 	glGenBuffers(2, bo);
-	glUseProgram(gd->fill_shader.prog);
-	glUniform4f(gd->fill_shader.color_loc, (GLfloat)c.red, (GLfloat)c.green,
-	            (GLfloat)c.blue, (GLfloat)c.alpha);
-	glEnableVertexAttribArray(fill_vert_in_coord_loc);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
 
-	auto coord = ccalloc(nrects * 8, GLint);
+	auto coord = ccalloc(nrects * 16, GLint);
 	auto indices = ccalloc(nrects * 6, GLuint);
-	for (int i = 0; i < nrects; i++) {
-		GLint y1 = y_inverted ? height - rect[i].y2 : rect[i].y1,
-		      y2 = y_inverted ? height - rect[i].y1 : rect[i].y2;
-		// clang-format off
-		memcpy(&coord[i * 8],
-		       ((GLint[][2]){
-		           {rect[i].x1, y1}, {rect[i].x2, y1},
-		           {rect[i].x2, y2}, {rect[i].x1, y2}}),
-		       sizeof(GLint[2]) * 4);
-		// clang-format on
-		indices[i * 6 + 0] = (GLuint)i * 4 + 0;
-		indices[i * 6 + 1] = (GLuint)i * 4 + 1;
-		indices[i * 6 + 2] = (GLuint)i * 4 + 2;
-		indices[i * 6 + 3] = (GLuint)i * 4 + 2;
-		indices[i * 6 + 4] = (GLuint)i * 4 + 3;
-		indices[i * 6 + 5] = (GLuint)i * 4 + 0;
-	}
-	glBufferData(GL_ARRAY_BUFFER, nrects * 8 * (long)sizeof(*coord), coord, GL_STREAM_DRAW);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, nrects * 6 * (long)sizeof(*indices),
-	             indices, GL_STREAM_DRAW);
+	gl_mask_rects_to_coords((struct coord){0, 0}, (struct coord){0, 0}, 
+							nrects, rect, coord, indices);
 
-	glVertexAttribPointer(fill_vert_in_coord_loc, 2, GL_INT, GL_FALSE,
-	                      sizeof(*coord) * 2, (void *)0);
+	glBufferData(GL_ARRAY_BUFFER, nrects * 16 * (long)sizeof(*coord), coord, GL_STREAM_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, nrects * 6 * (long)sizeof(*indices), indices, GL_STREAM_DRAW);
+
+	glEnableVertexAttribArray(fill_vert_in_coord_loc);
+	glVertexAttribPointer(fill_vert_in_coord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 4, NULL);
+	
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
 	glDrawElements(GL_TRIANGLES, nrects * 6, GL_UNSIGNED_INT, NULL);
 
@@ -726,7 +739,7 @@ static void gl_fill_inner(backend_t *base, struct color c, const region_t *clip,
 
 void gl_fill(backend_t *base, struct color c, const region_t *clip) {
 	auto gd = (struct gl_data *)base;
-	return gl_fill_inner(base, c, clip, gd->back_fbo, gd->height, true);
+	return gl_fill_inner(base, c, clip, gd->back_fbo);
 }
 
 void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
@@ -758,7 +771,7 @@ void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
 	glClearColor(0, 0, 0, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	gl_fill_inner(base, (struct color){1, 1, 1, 1}, reg, gd->temp_fbo, size.height, false);
+	gl_fill_inner(base, (struct color){1, 1, 1, 1}, reg, gd->temp_fbo);
 
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1127,35 +1140,23 @@ static void gl_image_apply_alpha(backend_t *base, struct backend_image *img,
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, inner->texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
-	gl_fill_inner(base, (struct color){0, 0, 0, 0}, reg_op, gd->temp_fbo, inner->height, !inner->y_inverted);
+	gl_fill_inner(base, (struct color){0, 0, 0, 0}, reg_op, gd->temp_fbo);
 
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
-void gl_present(backend_t *base, const region_t *region) {
+void gl_present(backend_t *base, const region_t *region) 
+{
 	auto gd = (struct gl_data *)base;
 
 	int nrects;
-	const rect_t *rect = pixman_region32_rectangles((region_t *)region, &nrects);
-	auto coord = ccalloc(nrects * 8, GLint);
+	const rect_t *rects = pixman_region32_rectangles((region_t *)region, &nrects);
+	auto coord = ccalloc(nrects * 16, GLint);
 	auto indices = ccalloc(nrects * 6, GLuint);
-	for (int i = 0; i < nrects; i++) {
-		// clang-format off
-		memcpy(&coord[i * 8],
-		       ((GLint[]){rect[i].x1, gd->height - rect[i].y2,
-		                 rect[i].x2, gd->height - rect[i].y2,
-		                 rect[i].x2, gd->height - rect[i].y1,
-		                 rect[i].x1, gd->height - rect[i].y1}),
-		       sizeof(GLint) * 8);
-		// clang-format on
-
-		GLuint u = (GLuint)(i * 4);
-		memcpy(&indices[i * 6],
-		       ((GLuint[]){u + 0, u + 1, u + 2, u + 2, u + 3, u + 0}),
-		       sizeof(GLuint) * 6);
-	}
-
+	gl_mask_rects_to_coords((struct coord){0, 0}, (struct coord){0, 0}, 
+							nrects, rects, coord, indices);
+							
 	glUseProgram(gd->present_prog);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, gd->back_texture);
@@ -1166,14 +1167,16 @@ void gl_present(backend_t *base, const region_t *region) {
 
 	GLuint bo[2];
 	glGenBuffers(2, bo);
-	glEnableVertexAttribArray(vert_coord_loc);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
-	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(GLint) * nrects * 8, coord, GL_STREAM_DRAW);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(GLuint) * nrects * 6, indices,
-	             GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(GLint) * nrects * 16, coord, GL_STREAM_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(GLuint) * nrects * 6, indices, GL_STREAM_DRAW);
 
-	glVertexAttribPointer(vert_coord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 2, NULL);
+	glEnableVertexAttribArray(vert_coord_loc);
+	glEnableVertexAttribArray(vert_in_texcoord_loc);
+	glVertexAttribPointer(vert_coord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 4, NULL);
+	glVertexAttribPointer(vert_in_texcoord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 4, (void *)(sizeof(GLint) * 2));
+
 	glDrawElements(GL_TRIANGLES, nrects * 6, GL_UNSIGNED_INT, NULL);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
