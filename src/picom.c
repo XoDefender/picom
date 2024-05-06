@@ -1180,20 +1180,26 @@ void root_damaged(session_t *ps) {
 		return;
 	}
 
-	if (ps->backend_data) {
+	if (ps->backend_data) 
+	{
 		if (ps->root_image) {
 			ps->backend_data->ops->release_image(ps->backend_data, ps->root_image);
 			ps->root_image = NULL;
 		}
+
 		auto pixmap = x_get_root_back_pixmap(ps->c, ps->root, ps->atoms);
-		if (pixmap != XCB_NONE) {
+		if (pixmap != XCB_NONE) 
+		{
 			ps->root_image = ps->backend_data->ops->bind_pixmap(
 			    ps->backend_data, pixmap, x_get_visual_info(ps->c, ps->vis), false);
+			ps->root_image_generation += 1;
+				
 			if (ps->root_image) {
 				ps->backend_data->ops->set_image_property(
 				    ps->backend_data, IMAGE_PROPERTY_EFFECTIVE_SIZE,
 				    ps->root_image, (int[]){ps->root_width, ps->root_height});
-			} else {
+			} 
+			else {
 				log_error("Failed to bind root back pixmap");
 			}
 		}
