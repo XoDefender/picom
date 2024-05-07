@@ -198,7 +198,7 @@ struct layout *layout_manager_layout(struct layout_manager *lm, unsigned age) {
 void layout_manager_mark_layers_with_to_paint(struct layout_manager *lm, region_t reg_scratch)
 {
 	pixman_region32_copy(&lm->scratch_region, &reg_scratch);
-	for(auto i = layout_manager_layout(lm, 0)->len - 1; i; i--)
+	for(int i = (int)layout_manager_layout(lm, 0)->len - 1; i >= 0; i--)
 	{
 		auto curr_layer = layout_manager_layout(lm, 0)->layers[i];
 		auto reg_bound_curr = win_get_bounding_shape_global_by_val(curr_layer.win);
