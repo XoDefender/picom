@@ -48,6 +48,7 @@
 #include "log.h"
 #include "region.h"
 #include "render.h"
+#include "renderer/layout.h"
 #include "types.h"
 #include "utils.h"
 #include "win.h"
@@ -1528,10 +1529,13 @@ static bool redirect_start(session_t *ps) {
 		return false;
 	}
 
-	if (!ps->o.legacy_backends) {
+	if (!ps->o.legacy_backends) 
+	{
 		assert(ps->backend_data);
 		ps->ndamage = ps->backend_data->ops->max_buffer_age;
-	} else {
+		ps->layout_manager = layout_manager_new((unsigned)ps->backend_data->ops->max_buffer_age);
+	} 
+	else {
 		ps->ndamage = maximum_buffer_age(ps);
 	}
 	ps->damage_ring = ccalloc(ps->ndamage, region_t);
@@ -1581,6 +1585,11 @@ static void unredirect(session_t *ps) {
 	ps->ndamage = 0;
 	free(ps->damage_ring);
 	ps->damage_ring = ps->damage = NULL;
+
+	if (ps->layout_manager) {
+		layout_manager_free(ps->layout_manager);
+		ps->layout_manager = NULL;
+	}
 
 	// Must call XSync() here
 	x_sync(ps->c);
@@ -1781,7 +1790,12 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 		static int paint = 0;
 
 		log_trace("Render start, frame %d", paint);
-		if (!ps->o.legacy_backends) {
+		if (!ps->o.legacy_backends) 
+		{
+			layout_manager_append_layout(ps->layout_manager, &ps->window_stack, ps->root_image_generation,
+			    						(struct geometry){.width = ps->root_width,
+			                      		.height = ps->root_height});
+
 			paint_all_new(ps, bottom, false);
 		} else {
 			paint_all(ps, bottom, false);

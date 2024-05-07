@@ -175,6 +175,8 @@ typedef struct session {
 	/// Shaders
 	struct shader_info *shaders;
 
+	struct layout_manager *layout_manager;
+
 	// === Display related ===
 	/// Whether the X server is grabbed by us
 	bool server_grabbed;
