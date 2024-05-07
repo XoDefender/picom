@@ -186,3 +186,25 @@ void layout_manager_append_layout(struct layout_manager *lm, struct list_node* w
 		HASH_ADD(hh, lm->layer_indices, key, sizeof(index->key), index);
 	}
 }
+
+void layout_manager_mark_layers_with_to_paint(struct layout_manager *lm, region_t reg_scratch)
+{
+	pixman_region32_copy(&lm->scratch_region, &reg_scratch);
+	struct layout curr_layout = lm->layouts[lm->current];
+	for(auto i = curr_layout.len - 1; i; i--)
+	{
+		auto curr_layer = curr_layout.layers[i];
+		auto reg_bound_curr = win_get_bounding_shape_global_by_val(curr_layer.win);
+
+		pixman_region32_intersect(&reg_bound_curr, &reg_bound_curr, &lm->scratch_region);
+		if(!pixman_region32_not_empty(&reg_bound_curr)) {
+			curr_layer.win->to_paint = false;
+		}
+
+		if(curr_layer.is_opaque) {
+			pixman_region32_subtract(&lm->scratch_region, &lm->scratch_region, &reg_bound_curr);
+		}
+			
+		pixman_region32_fini(&reg_bound_curr);
+	}
+}

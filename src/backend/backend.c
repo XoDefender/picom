@@ -81,25 +81,6 @@ void handle_device_reset(session_t *ps) {
 	ev_break(ps->loop, EVBREAK_ALL);
 }
 
-static void calculate_visible_reg_for_each_win(struct layout_manager *layout_manager, region_t reg_damage)
-{
-	pixman_region32_copy(&layout_manager->scratch_region, &reg_damage);
-	struct layout curr_layout = layout_manager->layouts[layout_manager->current];
-	for(auto i = curr_layout.len - 1; i; i--)
-	{
-		auto curr_layer = layout_manager->layouts[layout_manager->current].layers[i];
-		auto reg_bound_curr = win_get_bounding_shape_global_by_val(curr_layer.win);
-
-		pixman_region32_intersect(&reg_bound_curr, &reg_bound_curr, &layout_manager->scratch_region);
-		if(!pixman_region32_not_empty(&reg_bound_curr)) {
-			curr_layer.win->to_paint = false;
-		}
-
-		pixman_region32_subtract(&layout_manager->scratch_region, &layout_manager->scratch_region, &reg_bound_curr);
-		pixman_region32_fini(&reg_bound_curr);
-	}
-}
-
 /// paint all windows
 void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) 
 {
@@ -145,7 +126,7 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 	}
 
 	if(bkend_use_glx(ps)) {
-		calculate_visible_reg_for_each_win(ps->layout_manager, reg_damage);
+		layout_manager_mark_layers_with_to_paint(ps->layout_manager, reg_damage);
 	}
 
 #ifdef DEBUG_REPAINT
@@ -241,8 +222,9 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 	for (auto w = t; w; w = w->prev_trans) 
 	{
 		// TODO:Kirill - process window compositing smarter
-		if(w->to_paint == false)
+		if(!w->to_paint) {
 			continue;
+		}
 
 		pixman_region32_subtract(&reg_visible, &ps->screen_reg, w->reg_ignore);
 		assert(!(w->flags & WIN_FLAGS_IMAGE_ERROR));

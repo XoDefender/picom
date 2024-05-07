@@ -51,16 +51,6 @@ struct layer {
 	bool is_opaque;
 	/// Is this window clipping the windows beneath it?
 	bool is_clipping;
-
-	// TODO(yshui) make opaqueness/blur finer grained maybe? to support
-	// things like blur-background-frame
-	// region_t opaque_region;
-	// region_t blur_region;
-
-	// TODO(yshui) support cropping
-	/// x and y offset for cropping. Anything to the top or
-	/// left of the crop point will be cropped out.
-	// uint32_t crop_x, crop_y;
 };
 
 /// Layout of windows at a specific frame
@@ -125,3 +115,5 @@ struct layout *layout_manager_layout(struct layout_manager *lm, unsigned age);
 void layout_manager_free(struct layout_manager *lm);
 /// Create a new render lm with a ring buffer for `max_buffer_age` layouts.
 struct layout_manager *layout_manager_new(unsigned max_buffer_age);
+
+void layout_manager_mark_layers_with_to_paint(struct layout_manager *lm, region_t reg_scratch);
