@@ -1796,7 +1796,7 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 			    						(struct geometry){.width = ps->root_width,
 			                      		.height = ps->root_height});
 
-			paint_all_new(ps, bottom, false);
+			paint_all_new(ps, false);
 		} else {
 			paint_all(ps, bottom, false);
 		}

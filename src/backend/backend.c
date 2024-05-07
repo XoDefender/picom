@@ -82,10 +82,11 @@ void handle_device_reset(session_t *ps) {
 }
 
 /// paint all windows
-void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage) 
+void paint_all_new(session_t *ps, bool ignore_damage) 
 {
 	struct timespec now = get_time_timespec();
 	auto paint_all_start_us = (uint64_t)now.tv_sec * 1000000UL + (uint64_t)now.tv_nsec / 1000;
+	struct managed_win* bottom = layout_manager_layout(ps->layout_manager, 0)->layers[0].win;
 
 	if (ps->backend_data->ops->device_status &&
 	    ps->backend_data->ops->device_status(ps->backend_data) != DEVICE_STATUS_NORMAL) {
@@ -103,8 +104,7 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 	}
 
 	now = get_time_timespec();
-	auto after_sync_fence_us =
-	    (uint64_t)now.tv_sec * 1000000UL + (uint64_t)now.tv_nsec / 1000;
+	auto after_sync_fence_us = (uint64_t)now.tv_sec * 1000000UL + (uint64_t)now.tv_nsec / 1000;
 	log_trace("Time spent on sync fence: %" PRIu64 " us",
 	          after_sync_fence_us - paint_all_start_us);
 
@@ -123,10 +123,6 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 	if (!pixman_region32_not_empty(&reg_damage)) {
 		pixman_region32_fini(&reg_damage);
 		return;
-	}
-
-	if(bkend_use_glx(ps)) {
-		layout_manager_mark_layers_with_to_paint(ps->layout_manager, reg_damage);
 	}
 
 #ifdef DEBUG_REPAINT
@@ -163,8 +159,8 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 		// That is, the damaged window is at the bottom of the stack, and
 		// all other windows have semi-transparent background
 		int resize_factor = 1;
-		if (t) {
-			resize_factor = t->stacking_rank;
+		if (bottom) {
+			resize_factor = bottom->stacking_rank;
 		}
 		resize_region_in_place(&reg_damage, blur_width * resize_factor,
 		                       blur_height * resize_factor);
@@ -182,14 +178,14 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 	region_t reg_visible;
 	pixman_region32_init(&reg_visible);
 	pixman_region32_copy(&reg_visible, &ps->screen_reg);
-	if (t && !ps->o.transparent_clipping) {
+	if (bottom && !ps->o.transparent_clipping) {
 		// Calculate the region upon which the root window (wallpaper) is to be
 		// painted based on the ignore region of the lowest window, if available
 		//
 		// NOTE If transparent_clipping is enabled, transparent windows are
 		// included in the reg_ignore, but we still want to have the wallpaper
 		// beneath them, so we don't use reg_ignore for wallpaper in that case.
-		pixman_region32_subtract(&reg_visible, &reg_visible, t->reg_ignore);
+		pixman_region32_subtract(&reg_visible, &reg_visible, bottom->reg_ignore);
 	}
 
 	// Region on screen we don't want any shadows on
@@ -213,15 +209,20 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 		ps->backend_data->ops->fill(ps->backend_data, (struct color){0, 0, 0, 1},
 		                            &reg_paint);
 	}
-
+	
 	// Windows are sorted from bottom to top
 	// Each window has a reg_ignore, which is the region obscured by all the windows
 	// on top of that window. This is used to reduce the number of pixels painted.
 	//
 	// Whether this is beneficial is to be determined XXX
-	for (auto w = t; w; w = w->prev_trans) 
+	for(unsigned int i = 0; i < layout_manager_layout(ps->layout_manager, 0)->len; i++)
 	{
-		// TODO:Kirill - process window compositing smarter
+		if(i == 0 && bkend_use_glx(ps)) {
+			layout_manager_mark_layers_with_to_paint(ps->layout_manager, ps->screen_reg);
+		}
+
+		auto curr_layer = layout_manager_layout(ps->layout_manager, 0)->layers[i];
+		struct managed_win *w = curr_layer.win;
 		if(!w->to_paint) {
 			continue;
 		}
@@ -234,8 +235,7 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 		// The bounding shape of the window, in global/target coordinates
 		// reminder: bounding shape contains the WM frame
 		auto reg_bound = win_get_bounding_shape_global_by_val(w);
-		auto reg_bound_no_corner =
-		    win_get_bounding_shape_global_without_corners_by_val(w);
+		auto reg_bound_no_corner = win_get_bounding_shape_global_without_corners_by_val(w);
 
 		if (!w->mask_image && (w->bounding_shaped || w->corner_radius != 0)) {
 			if(!w->widthb) ++w->widthb;
@@ -256,8 +256,7 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 			// So here we have make sure reg_paint_in_bound \in reg_visible
 			// There are a few other places below where this is needed as
 			// well.
-			pixman_region32_intersect(&reg_paint_in_bound,
-			                          &reg_paint_in_bound, &reg_visible);
+			pixman_region32_intersect(&reg_paint_in_bound,&reg_paint_in_bound, &reg_visible);
 		}
 
 		// Blur window background
@@ -307,7 +306,6 @@ void paint_all_new(session_t *ps, struct managed_win *t, bool ignore_damage)
 			}
 			assert(blur_opacity >= 0 && blur_opacity <= 1);
 
-			// Kirill
 			void *blur_context = w->blur_context ? w->blur_context : ps->backend_blur_context;
 
 			if (real_win_mode == WMODE_TRANS || ps->o.force_win_blend) {

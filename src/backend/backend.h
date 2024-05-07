@@ -598,5 +598,5 @@ struct backend_operations {
 
 extern struct backend_operations *backend_list[];
 
-void paint_all_new(session_t *ps, struct managed_win *const t, bool ignore_damage)
+void paint_all_new(session_t *ps, bool ignore_damage)
     attr_nonnull(1);
