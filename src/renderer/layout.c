@@ -16,23 +16,28 @@
 /// Compute layout of a layer from a window. Returns false if the window is not
 /// visible / should not be rendered. `out_layer` is modified either way.
 static bool
-layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometry size) {
-	bool to_paint = false;
+layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometry size) 
+{
+	out_layer->to_paint = false;
+
 	if (!w->ever_damaged || w->paint_excluded) {
 		goto out;
 	}
 
 	out_layer->origin = (struct coord){.x = w->g.x, .y = w->g.y};
 	out_layer->size = (struct geometry){.width = w->widthb, .height = w->heightb};
-	if (w->shadow) {
+	if (w->shadow) 
+	{
 		out_layer->shadow_origin =
 		    (struct coord){.x = w->g.x + w->shadow_dx, .y = w->g.y + w->shadow_dy};
 		out_layer->shadow_size =
 		    (struct geometry){.width = w->shadow_width, .height = w->shadow_height};
-	} else {
+	} 
+	else {
 		out_layer->shadow_origin = (struct coord){};
 		out_layer->shadow_size = (struct geometry){};
 	}
+
 	if (out_layer->size.width <= 0 || out_layer->size.height <= 0) {
 		goto out;
 	}
@@ -51,6 +56,7 @@ layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometr
 	pixman_region32_copy(&out_layer->damaged, &w->damaged);
 	pixman_region32_translate(&out_layer->damaged, out_layer->origin.x,
 	                          out_layer->origin.y);
+
 	// TODO(yshui) Is there a better way to handle shaped windows? Shaped windows can
 	// have a very large number of rectangles in their shape, we don't want to handle
 	// that and slow ourselves down. so we treat them as transparent and just use
@@ -61,11 +67,11 @@ layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometr
 	out_layer->prev_rank = -1;
 	out_layer->key = (struct layer_key){.window = w->base.id};
 	out_layer->win = w;
-	to_paint = true;
+	out_layer->to_paint = true;
 
 out:
 	pixman_region32_clear(&w->damaged);
-	return to_paint;
+	return out_layer->to_paint;
 }
 
 static void layout_deinit(struct layout *layout) {
@@ -195,23 +201,23 @@ struct layout *layout_manager_layout(struct layout_manager *lm, unsigned age) {
 	return &lm->layouts[(lm->current + lm->max_buffer_age - age) % lm->max_buffer_age];
 }
 
-void layout_manager_mark_layers_with_to_paint(struct layout_manager *lm, region_t reg_scratch)
+void layout_manager_mark_obscured_layers(struct layout_manager *lm, region_t *reg_scratch)
 {
-	pixman_region32_copy(&lm->scratch_region, &reg_scratch);
+	pixman_region32_copy(&lm->scratch_region, reg_scratch);
 	for(int i = (int)layout_manager_layout(lm, 0)->len - 1; i >= 0; i--)
 	{
-		auto curr_layer = layout_manager_layout(lm, 0)->layers[i];
-		auto reg_bound_curr = win_get_bounding_shape_global_by_val(curr_layer.win);
+		auto curr_layer = &layout_manager_layout(lm, 0)->layers[i];
+		auto reg_bound_curr = win_get_bounding_shape_global_by_val(curr_layer->win);
 
 		pixman_region32_intersect(&reg_bound_curr, &reg_bound_curr, &lm->scratch_region);
 		if(!pixman_region32_not_empty(&reg_bound_curr)) {
-			curr_layer.win->to_paint = false;
+			curr_layer->to_paint = false;
 		}
 
-		if(curr_layer.is_opaque) {
+		if(curr_layer->is_opaque) {
 			pixman_region32_subtract(&lm->scratch_region, &lm->scratch_region, &reg_bound_curr);
 		}
-			
+
 		pixman_region32_fini(&reg_bound_curr);
 	}
 }

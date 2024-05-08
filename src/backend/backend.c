@@ -457,15 +457,13 @@ void paint_all_new(session_t *ps, bool ignore_damage)
 	// First need to imitate the depth test on CPU
 	// to decide whether to pass the window to the rendering pipeline
 	if(bkend_use_glx(ps)) {
-		layout_manager_mark_layers_with_to_paint(ps->layout_manager, ps->screen_reg);
+		layout_manager_mark_obscured_layers(ps->layout_manager, &reg_paint);
 	}
 	for(unsigned int i = 0; i < layout_manager_layout(ps->layout_manager, 0)->len; i++)
 	{
 		auto curr_layer = layout_manager_layout(ps->layout_manager, 0)->layers[i];
 		struct managed_win *w = curr_layer.win;
-		if(!w->to_paint) {
-			continue;
-		}
+		if(!curr_layer.to_paint) { continue; }
 
 		pixman_region32_subtract(&reg_visible, &ps->screen_reg, w->reg_ignore);
 		assert(!(w->flags & WIN_FLAGS_IMAGE_ERROR));

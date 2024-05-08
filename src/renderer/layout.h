@@ -51,6 +51,9 @@ struct layer {
 	bool is_opaque;
 	/// Is this window clipping the windows beneath it?
 	bool is_clipping;
+
+	// Is this layer intended for painting
+	bool to_paint;
 };
 
 /// Layout of windows at a specific frame
@@ -115,5 +118,6 @@ struct layout *layout_manager_layout(struct layout_manager *lm, unsigned age);
 void layout_manager_free(struct layout_manager *lm);
 /// Create a new render lm with a ring buffer for `max_buffer_age` layouts.
 struct layout_manager *layout_manager_new(unsigned max_buffer_age);
-
-void layout_manager_mark_layers_with_to_paint(struct layout_manager *lm, region_t reg_scratch);
+// Calculate the layer`s region, decide whether it is visible and mark it with to_paint
+// It is not visible if does not intersect with reg_scratch (obscured by some layer higher on stack)
+void layout_manager_mark_obscured_layers(struct layout_manager *lm, region_t *reg_scratch);
