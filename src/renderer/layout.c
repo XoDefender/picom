@@ -208,9 +208,9 @@ void layout_manager_mark_layers_with_to_paint(struct layout_manager *lm, region_
 			curr_layer.win->to_paint = false;
 		}
 
-		//if(curr_layer.is_opaque) {
+		if(curr_layer.is_opaque) {
 			pixman_region32_subtract(&lm->scratch_region, &lm->scratch_region, &reg_bound_curr);
-		//}
+		}
 			
 		pixman_region32_fini(&reg_bound_curr);
 	}
