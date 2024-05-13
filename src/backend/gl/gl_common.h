@@ -107,6 +107,7 @@ struct gl_data {
 	gl_fill_shader_t fill_shader;
 	gl_shadow_shader_t shadow_shader;
 	GLuint back_texture, back_fbo;
+	GLuint temp_fbo;
 	GLuint present_prog;
 
 	GLuint default_mask_texture;
@@ -137,8 +138,6 @@ GLuint gl_create_program_from_strv(const char **vert_shaders, const char **frag_
 void *gl_create_window_shader(backend_t *backend_data, const char *source);
 void gl_destroy_window_shader(backend_t *backend_data, void *shader);
 uint64_t gl_get_shader_attributes(backend_t *backend_data, void *shader);
-bool gl_set_image_property(backend_t *backend_data, enum image_properties prop,
-                           void *image_data, void *args);
 
 /**
  * @brief Render a region with texture data.
@@ -163,7 +162,7 @@ void *gl_clone(backend_t *base, const void *image_data, const region_t *reg_visi
 
 bool gl_blur(backend_t *base, double opacity, void *ctx, void *mask, coord_t mask_dst,
              const region_t *reg_blur, const region_t *reg_visible);
-bool gl_blur_impl(double opacity, struct gl_blur_context *bctx, void *mask,
+bool gl_blur_inner(double opacity, struct gl_blur_context *bctx, void *mask,
                   coord_t mask_dst, const region_t *reg_blur,
                   const region_t *reg_visible attr_unused, GLuint source_texture,
                   geometry_t source_size, GLuint target_fbo, GLuint default_mask);
@@ -180,6 +179,18 @@ void gl_fill(backend_t *base, struct color, const region_t *clip);
 void gl_present(backend_t *base, const region_t *);
 bool gl_read_pixel(backend_t *base, void *image_data, int x, int y, struct color *output);
 enum device_status gl_device_status(backend_t *base);
+
+/// Convert a mask formed by a collection of rectangles to OpenGL vertex and texture
+/// coordinates.
+///
+/// @param[in]  origin      origin of the source image in target coordinates
+/// @param[in]  mask_origin origin of the mask in source coordinates
+/// @param[in]  nrects      number of rectangles
+/// @param[in]  rects       mask rectangles, in mask coordinates
+/// @param[out] coord       OpenGL vertex coordinates, suitable for creating VAO/VBO
+/// @param[out] indices     OpenGL vertex indices, suitable for creating VAO/VBO
+void gl_mask_rects_to_coords(struct coord origin, struct coord mask_origin, int nrects,
+                             const rect_t *rects, GLint *coord, GLuint *indices);
 
 /**
  * Get a textual representation of an OpenGL error.

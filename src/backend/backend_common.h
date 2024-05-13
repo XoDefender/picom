@@ -42,6 +42,7 @@ struct backend_image {
 	int ewidth, eheight;
 	bool color_inverted;
 	int border_width;
+	void *shader;
 };
 
 bool build_shadow(xcb_connection_t *, xcb_drawable_t, double opacity, int width,
@@ -84,4 +85,4 @@ void *default_clone_image(backend_t *base, const void *image_data, const region_
 bool default_is_image_transparent(backend_t *base attr_unused, void *image_data);
 bool default_set_image_property(backend_t *base attr_unused, enum image_properties op,
                                 void *image_data, void *arg);
-struct backend_image *default_new_backend_image(int w, int h);
+void default_init_backend_image(struct backend_image *image, int w, int h);

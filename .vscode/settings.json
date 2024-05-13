@@ -3,6 +3,7 @@
         "array": "c",
         "string": "c",
         "string_view": "c",
-        "render.h": "c"
+        "render.h": "c",
+        "random": "c"
     }
 }

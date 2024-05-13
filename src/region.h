@@ -17,7 +17,7 @@ typedef pixman_box32_t rect_t;
 RC_TYPE(region_t, rc_region, pixman_region32_init, pixman_region32_fini, static inline)
 
 static inline void dump_region(const region_t *x) {
-	if (log_get_level_tls() < LOG_LEVEL_TRACE) {
+	if (log_get_level_tls() > LOG_LEVEL_TRACE) {
 		return;
 	}
 	int nrects;
@@ -97,4 +97,13 @@ static inline region_t resize_region(const region_t *region, int dx, int dy) {
 
 static inline void resize_region_in_place(region_t *region, int dx, int dy) {
 	return _resize_region(region, region, dx, dy);
+}
+
+static inline rect_t region_translate_rect(rect_t rect, struct coord origin) {
+	return (rect_t){
+	    .x1 = rect.x1 + origin.x,
+	    .y1 = rect.y1 + origin.y,
+	    .x2 = rect.x2 + origin.x,
+	    .y2 = rect.y2 + origin.y,
+	};
 }

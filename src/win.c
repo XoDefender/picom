@@ -2182,8 +2182,7 @@ void win_on_factor_change(session_t *ps, struct managed_win *w) {
 
 	w->fade_excluded = c2_match(ps, w, ps->o.fade_blacklist, NULL);
 
-	w->transparent_clipping_excluded =
-	    c2_match(ps, w, ps->o.transparent_clipping_blacklist, NULL);
+	w->transparent_clipping = ps->o.transparent_clipping && !c2_match(ps, w, ps->o.transparent_clipping_blacklist, NULL);
 
 	win_update_opacity_target(ps, w);
 
@@ -2423,6 +2422,7 @@ void free_win_res(session_t *ps, struct managed_win *w) {
 	// Above should be done during unmapping
 	// Except when we are called by session_destroy
 
+	pixman_region32_fini(&w->damaged);
 	pixman_region32_fini(&w->bounding_shape);
 	// BadDamage may be thrown if the window is destroyed
 	set_ignore_cookie(ps, xcb_damage_destroy(ps->c, w->damage));
@@ -2563,7 +2563,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    .rounded_corners = false,
 	    .paint_excluded = false,
 	    .fade_excluded = false,
-	    .transparent_clipping_excluded = false,
+	    .transparent_clipping = false,
 	    .unredir_if_possible_excluded = false,
 	    .prop_shadow = -1,
 	    // following 4 are set in win_mark_client
@@ -2731,6 +2731,9 @@ struct win *fill_win(session_t *ps, struct win *w) {
 		cdbus_ev_win_added(ps, &new->base);
 	}
 #endif
+
+	pixman_region32_init(&new->damaged);
+
 	return &new->base;
 }
 
