@@ -21,7 +21,7 @@
 
 #define ARR_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
-#define CLEAR_MASK(x) x = 0; // Kirill
+#define CLEAR_MASK(x) x = 0;
 
 #ifdef __FAST_MATH__
 #warning Use of -ffast-math can cause rendering error or artifacts, \
@@ -45,6 +45,19 @@ safe_isnan(double a) {
 		assert(false);                                                           \
 		abort();                                                                 \
 	} while (0)
+
+/// Abort the program if `expr` is true. This is similar to assert, but it is not disabled
+/// in release builds.
+#define BUG_ON(expr)                                                                     \
+	do {                                                                             \
+		bool __bug_on_tmp = (expr);                                              \
+		assert(!__bug_on_tmp && "Original expr: " #expr);                        \
+		if (__bug_on_tmp) {                                                      \
+			fprintf(stderr, "BUG_ON: \"%s\"\n", #expr);                      \
+			abort();                                                         \
+		}                                                                        \
+	} while (0)
+
 #define CHECK_EXPR(...) ((void)0)
 /// Same as assert, but evaluates the expression even in release builds
 #define CHECK(expr)                                                                      \

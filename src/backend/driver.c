@@ -18,9 +18,17 @@ bool is_software_render(enum driver driver)
 }
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
-void apply_driver_workarounds(struct session *ps) {
-	if (!is_bkend_ready(ps) && !ps->o.force_glx && is_software_render(ps->drivers))
+void apply_driver_workarounds(struct session *ps) 
+{
+	bool force_xrender = false;
+	#ifdef ELBRUS
+		force_xrender = true;
+	#endif
+
+	if (!is_bkend_ready(ps) && !ps->o.force_glx /*&& is_software_render(ps->drivers)*/
+		&& (getenv("FLY_VM_NAME") || force_xrender)) { // tmp workaround over vms
 		ps->o.backend = BKEND_XRENDER;
+	} 
 
 	if (ps->drivers & DRIVER_NVIDIA) {
 		setenv("__GL_MaxFramesAllowed", "1", true);
@@ -84,7 +92,9 @@ void detect_driver_ddx(xcb_connection_t *c, xcb_window_t window, enum driver* re
 
 void detect_driver_opengl(session_t *ps, enum driver* ret) 
 {
-	if(is_bkend_ready(ps)) return;
+	if(is_bkend_ready(ps)) {
+		return;
+	}
 
 	int nitems = 0;
 	XVisualInfo vreq = {.visualid = ps->vis};
@@ -94,13 +104,19 @@ void detect_driver_opengl(session_t *ps, enum driver* ret)
     glXMakeCurrent(ps->dpy, ps->root, gl_context);
 
 	const char *renderer = (const char *)glGetString(GL_RENDERER);
-	if(!renderer) return;
-	if(!strncmp(renderer, "llvmpipe", strlen("llvmpipe")))
+	if(!renderer) {
+		return;
+	}
+	
+	if(!strncmp(renderer, "llvmpipe", strlen("llvmpipe"))) {
 		*ret |= DRIVER_LLVMPIPE;
-	else if(!strncmp(renderer, "softpipe", strlen("softpipe")))
+	}
+	else if(!strncmp(renderer, "softpipe", strlen("softpipe"))){
 		*ret |= DRIVER_SOFTPIPE;
-	else if(!strncmp(renderer, "Software Rasterizer", strlen("Software Rasterizer")))
+	}
+	else if(!strncmp(renderer, "Software Rasterizer", strlen("Software Rasterizer"))) {
 		*ret |= DRIVER_SWRAST;
+	}
 
 	XFree(visual_info);
 	glXMakeCurrent(ps->dpy, None, NULL);
@@ -112,7 +128,7 @@ enum driver detect_driver(struct session *ps)
 	enum driver ret = 0;
 	
 	detect_driver_ddx(ps->c, ps->root, &ret);
-	detect_driver_opengl(ps, &ret);
+	// detect_driver_opengl(ps, &ret);
 
 	if (ps->backend_data && ps->backend_data->ops->detect_driver) {
 		ret |= ps->backend_data->ops->detect_driver(ps->backend_data);

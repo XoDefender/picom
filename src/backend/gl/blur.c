@@ -253,7 +253,7 @@ bool gl_dual_kawase_blur(double opacity, struct gl_blur_context *bctx, const rec
 	return true;
 }
 
-bool gl_blur_impl(double opacity, struct gl_blur_context *bctx, void *mask,
+bool gl_blur_inner(double opacity, struct gl_blur_context *bctx, void *mask,
                   coord_t mask_dst, const region_t *reg_blur,
                   const region_t *reg_visible attr_unused, GLuint source_texture,
                   geometry_t source_size, GLuint target_fbo, GLuint default_mask) {
@@ -397,7 +397,7 @@ bool gl_blur(backend_t *base, double opacity, void *ctx, void *mask, coord_t mas
              const region_t *reg_blur, const region_t *reg_visible attr_unused) {
 	auto gd = (struct gl_data *)base;
 	auto bctx = (struct gl_blur_context *)ctx;
-	return gl_blur_impl(opacity, bctx, mask, mask_dst, reg_blur, reg_visible,
+	return gl_blur_inner(opacity, bctx, mask, mask_dst, reg_blur, reg_visible,
 	                    gd->back_texture,
 	                    (geometry_t){.width = gd->width, .height = gd->height},
 	                    gd->back_fbo, gd->default_mask_texture);
@@ -620,12 +620,12 @@ bool gl_create_kernel_blur_context(void *blur_context, GLfloat *projection,
 		    (const char *[]){vertex_shader, NULL},
 		    (const char *[]){blend_with_mask_frag, masking_glsl, NULL});
 		pass->uniform_pixel_norm = -1;
+		pass->uniform_opacity = -1;
 		pass->texorig_loc = glGetUniformLocationChecked(pass->prog, "texorig");
 		bind_uniform(pass, mask_tex);
 		bind_uniform(pass, mask_offset);
 		bind_uniform(pass, mask_inverted);
 		bind_uniform(pass, mask_corner_radius);
-		bind_uniform(pass, opacity);
 
 		// Setup projection matrix
 		glUseProgram(pass->prog);

@@ -42,9 +42,9 @@ static const char *driver_names[] = {
 	"Software rasterizer",
 };
 
-/// Return a list of all drivers currently in use.
-/// Includes getting as X server as OpenGL drivers
-enum driver detect_driver(struct session *);
+/// Return a list of all drivers currently in use by the X server.
+/// Note, this is a best-effort test, so no guarantee all drivers will be detected.
+enum driver detect_driver(struct session *ps);
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
 void apply_driver_workarounds(struct session *ps);

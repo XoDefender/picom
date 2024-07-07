@@ -342,6 +342,9 @@ static inline void ev_reparent_notify(session_t *ps, xcb_reparent_notify_event_t
 				if (!ret && w->managed) {
 					auto mw = (struct managed_win *)w;
 					CHECK(win_skip_fading(ps, mw));
+					if (mw->to_paint) {
+						add_damage_from_win(ps, mw);
+					}
 				}
 			}
 		}
@@ -621,7 +624,9 @@ static inline void ev_property_notify(session_t *ps, xcb_property_notify_event_t
 	}
 }
 
-static inline void repair_win(session_t *ps, struct managed_win *w) {
+static inline 
+void repair_win(session_t *ps, struct managed_win *w) 
+{
 	// Only mapped window can receive damages
 	assert(win_is_mapped_in_x(w));
 

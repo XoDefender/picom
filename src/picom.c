@@ -48,6 +48,7 @@
 #include "log.h"
 #include "region.h"
 #include "render.h"
+#include "renderer/layout.h"
 #include "types.h"
 #include "utils.h"
 #include "win.h"
@@ -644,6 +645,7 @@ static void configure_root(session_t *ps) {
 
 	ps->root_width = r->width;
 	ps->root_height = r->height;
+	free(r);
 
 	rebuild_screen_reg(ps);
 	rebuild_shadow_exclude_reg(ps);
@@ -885,13 +887,13 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 			}
 
 			// Submit window size change
-			if (size_changed) {
+			if (size_changed) 
+			{
 				win_on_win_size_change(ps, w);
 
 				pixman_region32_clear(&w->bounding_shape);
 				pixman_region32_fini(&w->bounding_shape);
-				pixman_region32_init_rect(&w->bounding_shape, 0, 0,
-				                          (uint)w->widthb, (uint)w->heightb);
+				pixman_region32_init_rect(&w->bounding_shape, 0, 0, (uint)w->widthb, (uint)w->heightb);
 
 				if(w->bounding_shaped)
 				{
@@ -1072,8 +1074,8 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 		// If the window is solid, or we enabled clipping for transparent windows,
 		// we add the window region to the ignored region
 		// Otherwise last_reg_ignore shouldn't change
-		if ((w->mode != WMODE_TRANS && !ps->o.force_win_blend) ||
-		    (ps->o.transparent_clipping && !w->transparent_clipping_excluded)) {
+		if ((w->mode != WMODE_TRANS && !ps->o.force_win_blend) || w->transparent_clipping) 
+		{
 			// w->mode == WMODE_SOLID or WMODE_FRAME_TRANS
 			region_t *tmp = rc_region_new();
 			if (w->mode == WMODE_SOLID) {
@@ -1186,9 +1188,11 @@ void root_damaged(session_t *ps) {
 			ps->root_image = NULL;
 		}
 		auto pixmap = x_get_root_back_pixmap(ps->c, ps->root, ps->atoms);
-		if (pixmap != XCB_NONE) {
+		if (pixmap != XCB_NONE) 
+		{
 			ps->root_image = ps->backend_data->ops->bind_pixmap(
 			    ps->backend_data, pixmap, x_get_visual_info(ps->c, ps->vis), false);
+				ps->root_image_generation += 1;
 			if (ps->root_image) {
 				ps->backend_data->ops->set_image_property(
 				    ps->backend_data, IMAGE_PROPERTY_EFFECTIVE_SIZE,
@@ -1197,6 +1201,8 @@ void root_damaged(session_t *ps) {
 				log_error("Failed to bind root back pixmap");
 			}
 		}
+
+		ps->root_damaged = true;
 	}
 
 	// Mark screen damaged
@@ -1523,6 +1529,7 @@ static bool redirect_start(session_t *ps) {
 	if (!ps->o.legacy_backends) {
 		assert(ps->backend_data);
 		ps->ndamage = ps->backend_data->ops->max_buffer_age;
+		ps->layout_manager = layout_manager_new((unsigned)ps->backend_data->ops->max_buffer_age);
 	} else {
 		ps->ndamage = maximum_buffer_age(ps);
 	}
@@ -1573,6 +1580,11 @@ static void unredirect(session_t *ps) {
 	ps->ndamage = 0;
 	free(ps->damage_ring);
 	ps->damage_ring = ps->damage = NULL;
+
+	if (ps->layout_manager) {
+		layout_manager_free(ps->layout_manager);
+		ps->layout_manager = NULL;
+	}
 
 	// Must call XSync() here
 	x_sync(ps->c);
@@ -1773,9 +1785,14 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 		static int paint = 0;
 
 		log_trace("Render start, frame %d", paint);
-		if (!ps->o.legacy_backends) {
-			paint_all_new(ps, bottom, false);
-		} else {
+		if (!ps->o.legacy_backends) 
+		{
+			layout_manager_append_layout(ps->layout_manager, &ps->window_stack, ps->root_image_generation,
+			    						(struct geometry){.width = ps->root_width, .height = ps->root_height});
+
+			paint_all_new(ps, bkend_use_xrender(ps) && ps->active_win == ps->switcher_win);
+		} 
+		else {
 			paint_all(ps, bottom, false);
 		}
 		log_trace("Render end");
@@ -1912,6 +1929,7 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
                                const char *config_file, bool all_xerrors, bool fork) {
 	static const session_t s_def = {
 	    .backend_data = NULL,
+		.legacy_backend_ready = false,
 	    .dpy = NULL,
 	    .scr = 0,
 	    .c = NULL,
@@ -1945,6 +1963,8 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	    .windows = NULL,
 	    .active_win = NULL,
 	    .active_leader = XCB_NONE,
+
+		.switcher_win = NULL,
 
 	    .black_picture = XCB_NONE,
 	    .cshadow_picture = XCB_NONE,
@@ -2190,24 +2210,25 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	      c2_list_postprocess(ps, ps->o.shadow_clip_list) &&
 	      c2_list_postprocess(ps, ps->o.fade_blacklist) &&
 	      c2_list_postprocess(ps, ps->o.blur_background_blacklist) &&
-		  c2_list_postprocess(ps, ps->o.animation_blacklist) && // Kirill
+		  c2_list_postprocess(ps, ps->o.animation_blacklist) &&
 	      c2_list_postprocess(ps, ps->o.invert_color_list) &&
 	      c2_list_postprocess(ps, ps->o.window_shader_fg_rules) &&
 	      c2_list_postprocess(ps, ps->o.opacity_rules) &&
-		  c2_list_postprocess(ps, ps->o.corners_rounding_rules) && // Kirill
+		  c2_list_postprocess(ps, ps->o.corners_rounding_rules) &&
 	      c2_list_postprocess(ps, ps->o.rounded_corners_blacklist) &&
-		  c2_list_postprocess(ps, ps->o.animating_rules_open) && // Kirill
-		  c2_list_postprocess(ps, ps->o.animating_rules_unmap) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_color_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_opacity_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_radius_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_offset_x_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.shadow_offset_y_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_deviation_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_size_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_strength_rules) && // Kirill
-		  c2_list_postprocess(ps, ps->o.blur_method_rules) && // Kirill
-	      c2_list_postprocess(ps, ps->o.focus_blacklist))) {
+		  c2_list_postprocess(ps, ps->o.animating_rules_open) &&
+		  c2_list_postprocess(ps, ps->o.animating_rules_unmap) &&
+		  c2_list_postprocess(ps, ps->o.shadow_color_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_opacity_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_radius_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_offset_x_rules) && 
+		  c2_list_postprocess(ps, ps->o.shadow_offset_y_rules) && 
+		  c2_list_postprocess(ps, ps->o.blur_deviation_rules) && 
+		  c2_list_postprocess(ps, ps->o.blur_size_rules) && 
+		  c2_list_postprocess(ps, ps->o.blur_strength_rules) && 
+		  c2_list_postprocess(ps, ps->o.blur_method_rules) && 
+	      c2_list_postprocess(ps, ps->o.focus_blacklist) && 
+		  c2_list_postprocess(ps, ps->o.transparent_clipping_blacklist))) {
 		log_error("Post-processing of conditionals failed, some of your rules "
 		          "might not work");
 	}
@@ -2596,21 +2617,22 @@ static void session_destroy(session_t *ps) {
 	c2_list_free(&ps->o.opacity_rules, NULL);
 	c2_list_free(&ps->o.paint_blacklist, NULL);
 	c2_list_free(&ps->o.unredir_if_possible_blacklist, NULL);
-	c2_list_free(&ps->o.animation_blacklist, NULL); // Kirill
-	c2_list_free(&ps->o.corners_rounding_rules, NULL); // Kirill
+	c2_list_free(&ps->o.animation_blacklist, NULL); 
+	c2_list_free(&ps->o.corners_rounding_rules, NULL); 
 	c2_list_free(&ps->o.rounded_corners_blacklist, NULL);
-	c2_list_free(&ps->o.animating_rules_open, NULL); // Kirill
-	c2_list_free(&ps->o.animating_rules_unmap, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_color_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_opacity_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_radius_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_offset_x_rules, NULL); // Kirill
-	c2_list_free(&ps->o.shadow_offset_y_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_deviation_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_size_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_strength_rules, NULL); // Kirill
-	c2_list_free(&ps->o.blur_method_rules, NULL); // Kirill
+	c2_list_free(&ps->o.animating_rules_open, NULL); 
+	c2_list_free(&ps->o.animating_rules_unmap, NULL); 
+	c2_list_free(&ps->o.shadow_color_rules, NULL); 
+	c2_list_free(&ps->o.shadow_opacity_rules, NULL); 
+	c2_list_free(&ps->o.shadow_radius_rules, NULL); 
+	c2_list_free(&ps->o.shadow_offset_x_rules, NULL); 
+	c2_list_free(&ps->o.shadow_offset_y_rules, NULL); 
+	c2_list_free(&ps->o.blur_deviation_rules, NULL); 
+	c2_list_free(&ps->o.blur_size_rules, NULL); 
+	c2_list_free(&ps->o.blur_strength_rules, NULL); 
+	c2_list_free(&ps->o.blur_method_rules, NULL); 
 	c2_list_free(&ps->o.window_shader_fg_rules, free);
+	c2_list_free(&ps->o.transparent_clipping_blacklist, NULL);
 
 	// Free tracked atom list
 	{

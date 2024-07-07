@@ -189,7 +189,7 @@ void gl_destroy_window_shader(backend_t *backend_data attr_unused, void *shader)
  * between each other on each render iteration.
  */
 static GLuint
-_gl_average_texture_color(backend_t *base, GLuint source_texture, GLuint destination_texture,
+gl_average_texture_color_inner(backend_t *base, GLuint source_texture, GLuint destination_texture,
                           GLuint auxiliary_texture, GLuint fbo, int width, int height) {
 	const int max_width = 1;
 	const int max_height = 1;
@@ -234,11 +234,8 @@ _gl_average_texture_color(backend_t *base, GLuint source_texture, GLuint destina
 	GLuint result;
 	if (to_width > max_width || to_height > max_height) {
 		GLuint new_source_texture = destination_texture;
-		GLuint new_destination_texture =
-		    auxiliary_texture != 0 ? auxiliary_texture : source_texture;
-		result = _gl_average_texture_color(base, new_source_texture,
-		                                   new_destination_texture, 0, fbo,
-		                                   to_width, to_height);
+		GLuint new_destination_texture = auxiliary_texture != 0 ? auxiliary_texture : source_texture;
+		result = gl_average_texture_color_inner(base, new_source_texture, new_destination_texture, 0, fbo, to_width, to_height);
 	} else {
 		result = destination_texture;
 	}
@@ -253,39 +250,37 @@ _gl_average_texture_color(backend_t *base, GLuint source_texture, GLuint destina
  * Returned texture must not be deleted, since it's owned by the gl_image. It will be
  * deleted when the gl_image is released.
  */
-static GLuint gl_average_texture_color(backend_t *base, struct backend_image *img) {
+static GLuint gl_average_texture_color(backend_t *base, struct gl_texture *img) 
+{
 	auto gd = (struct gl_data *)base;
-	auto inner = (struct gl_texture *)img->inner;
 
 	// Prepare textures which will be used for destination and source of rendering
 	// during downscaling.
-	const int texture_count = ARR_SIZE(inner->auxiliary_texture);
-	if (!inner->auxiliary_texture[0]) {
-		assert(!inner->auxiliary_texture[1]);
-		glGenTextures(texture_count, inner->auxiliary_texture);
+	const int texture_count = ARR_SIZE(img->auxiliary_texture);
+	if (!img->auxiliary_texture[0]) {
+		assert(!img->auxiliary_texture[1]);
+		glGenTextures(texture_count, img->auxiliary_texture);
 		glActiveTexture(GL_TEXTURE0);
 		for (int i = 0; i < texture_count; i++) {
-			glBindTexture(GL_TEXTURE_2D, inner->auxiliary_texture[i]);
+			glBindTexture(GL_TEXTURE_2D, img->auxiliary_texture[i]);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 			glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR,
 			                 (GLint[]){0, 0, 0, 0});
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, inner->width,
-			             inner->height, 0, GL_BGR, GL_UNSIGNED_BYTE, NULL);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, img->width,
+			             img->height, 0, GL_BGR, GL_UNSIGNED_BYTE, NULL);
 		}
 	}
 
 	// Prepare framebuffer used for rendering and bind it
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
 	// Enable shaders
 	glUseProgram(gd->brightness_shader.prog);
 	glUniform2f(glGetUniformLocationChecked(gd->brightness_shader.prog, "texsize"),
-	            (GLfloat)inner->width, (GLfloat)inner->height);
+	            (GLfloat)img->width, (GLfloat)img->height);
 
 	// Prepare vertex attributes
 	GLuint vao;
@@ -309,9 +304,9 @@ static GLuint gl_average_texture_color(backend_t *base, struct backend_image *im
 	             GL_STATIC_DRAW);
 
 	// Do actual recursive render to 1x1 texture
-	GLuint result_texture = _gl_average_texture_color(
-	    base, inner->texture, inner->auxiliary_texture[0],
-	    inner->auxiliary_texture[1], fbo, inner->width, inner->height);
+	GLuint result_texture = gl_average_texture_color_inner(base, img->texture, img->auxiliary_texture[0], 
+													  img->auxiliary_texture[1], gd->temp_fbo, 
+													  img->width, img->height);
 
 	// Cleanup vertex attributes
 	glDisableVertexAttribArray(vert_coord_loc);
@@ -326,7 +321,6 @@ static GLuint gl_average_texture_color(backend_t *base, struct backend_image *im
 	glUseProgram(0);
 
 	// Cleanup framebuffers
-	glDeleteFramebuffers(1, &fbo);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	glDrawBuffer(GL_BACK);
 
@@ -338,68 +332,39 @@ static GLuint gl_average_texture_color(backend_t *base, struct backend_image *im
 	return result_texture;
 }
 
-/**
- * Render a region with texture data.
- *
- * @param ptex the texture
- * @param target the framebuffer to render into
- * @param dst_x,dst_y the top left corner of region where this texture
- *                    should go. In OpenGL coordinate system (important!).
- * @param reg_tgt     the clip region, in Xorg coordinate system
- * @param reg_visible ignored
- */
-static void _gl_compose(backend_t *base, struct backend_image *img, GLuint target,
-                        struct backend_image *mask, coord_t mask_offset, GLint *coord,
-                        GLuint *indices, int nrects) {
-	// FIXME(yshui) breaks when `mask` and `img` doesn't have the same y_inverted
-	//              value. but we don't ever hit this problem because all of our
-	//              images and masks are y_inverted.
-	auto gd = (struct gl_data *)base;
-	auto inner = (struct gl_texture *)img->inner;
-	auto mask_texture =
-	    mask ? ((struct gl_texture *)mask->inner)->texture : gd->default_mask_texture;
-	if (!img || !inner->texture) {
-		log_error("Missing texture.");
-		return;
-	}
-
-	GLuint brightness = 0;
-	if (img->max_brightness < 1.0) {
-		brightness = gl_average_texture_color(base, img);
-	}
-
-	auto win_shader = inner->shader;
-	if (!win_shader) {
-		win_shader = gd->default_shader;
-	}
-
+static void
+gl_set_win_shader_uniforms(struct backend_blit_args *blit_args, struct gl_texture *mask_image)
+{
+	auto win_shader = (gl_win_shader_t *)blit_args->shader;
 	assert(win_shader);
 	assert(win_shader->prog);
+
 	glUseProgram(win_shader->prog);
 	if (win_shader->uniform_opacity >= 0) {
-		glUniform1f(win_shader->uniform_opacity, (float)img->opacity);
+		glUniform1f(win_shader->uniform_opacity, (float)blit_args->opacity);
 	}
 	if (win_shader->uniform_invert_color >= 0) {
-		glUniform1i(win_shader->uniform_invert_color, img->color_inverted);
+		glUniform1i(win_shader->uniform_invert_color, blit_args->color_inverted);
 	}
 	if (win_shader->uniform_tex >= 0) {
 		glUniform1i(win_shader->uniform_tex, 0);
 	}
 	if (win_shader->uniform_dim >= 0) {
-		glUniform1f(win_shader->uniform_dim, (float)img->dim);
+		glUniform1f(win_shader->uniform_dim, (float)blit_args->dim);
 	}
 	if (win_shader->uniform_brightness >= 0) {
 		glUniform1i(win_shader->uniform_brightness, 1);
 	}
 	if (win_shader->uniform_max_brightness >= 0) {
-		glUniform1f(win_shader->uniform_max_brightness, (float)img->max_brightness);
+		glUniform1f(win_shader->uniform_max_brightness,
+		            (float)blit_args->max_brightness);
 	}
 	if (win_shader->uniform_corner_radius >= 0) {
-		glUniform1f(win_shader->uniform_corner_radius, (float)img->corner_radius);
+		glUniform1f(win_shader->uniform_corner_radius, (float)blit_args->corner_radius);
 	}
 	if (win_shader->uniform_border_width >= 0) {
-		auto border_width = img->border_width;
-		if (border_width > img->corner_radius) {
+		auto border_width = blit_args->border_width;
+		if (border_width > blit_args->corner_radius) {
 			border_width = 0;
 		}
 		glUniform1f(win_shader->uniform_border_width, (float)border_width);
@@ -412,28 +377,55 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	}
 
 	glUniform1i(win_shader->uniform_mask_tex, 2);
-	glUniform2f(win_shader->uniform_mask_offset, (float)mask_offset.x,
-	            (float)mask_offset.y);
-	if (mask != NULL) {
-		glUniform1i(win_shader->uniform_mask_inverted, mask->color_inverted);
-		glUniform1f(win_shader->uniform_mask_corner_radius,
-		            (GLfloat)mask->corner_radius);
-	} else {
+	if (blit_args->mask != NULL) 
+	{
+		glUniform2f(win_shader->uniform_mask_offset,
+		            (float)blit_args->mask->origin.x,
+		            (float)blit_args->mask->origin.y);
+
+		if (mask_image != NULL) 
+		{
+			glUniform1i(win_shader->uniform_mask_inverted, blit_args->mask->inverted);
+			glUniform1f(win_shader->uniform_mask_corner_radius, (GLfloat)blit_args->mask->corner_radius);
+		}
+	} 
+	else 
+	{
 		glUniform1i(win_shader->uniform_mask_inverted, 0);
 		glUniform1f(win_shader->uniform_mask_corner_radius, 0);
 	}
+}
 
-	glActiveTexture(GL_TEXTURE2);
-	glBindTexture(GL_TEXTURE_2D, mask_texture);
+/**
+ * Render a region with texture data.
+ *
+ * @param target_fbo   the FBO to render into
+ * @param blit_args arguments for the blit
+ * @param coord GL vertices
+ * @param indices GL indices
+ * @param nrects number of rectangles to render
+ */
+static void
+gl_blit_inner(backend_t *base, GLuint target_fbo, struct backend_blit_args *blit_args,
+              GLint *coord, GLuint *indices, int nrects) {
+	// FIXME(yshui) breaks when `mask` and `img` doesn't have the same y_inverted
+	//              value. but we don't ever hit this problem because all of our
+	//              images and masks are y_inverted.
+	auto gd = (struct gl_data *)base;
+	auto img = (struct gl_texture *)blit_args->source_image;
+	auto mask_image = blit_args->mask ? (struct gl_texture *)blit_args->mask->image : NULL;
+	auto mask_texture = mask_image ? mask_image->texture : gd->default_mask_texture;
+	GLuint brightness = blit_args->max_brightness < 1.0 ? gl_average_texture_color(base, img) : 0;
 
-	// log_trace("Draw: %d, %d, %d, %d -> %d, %d (%d, %d) z %d\n",
-	//          x, y, width, height, dx, dy, ptex->width, ptex->height, z);
+	gl_set_win_shader_uniforms(blit_args, mask_image);
 
 	// Bind texture
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, img->texture);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, brightness);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, inner->texture);
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, mask_texture);
 
 	GLuint vao;
 	glGenVertexArrays(1, &vao);
@@ -443,16 +435,16 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	glGenBuffers(2, bo);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
-	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * nrects * 16, coord, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(*coord) * nrects * 16, coord, GL_STREAM_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(*indices) * nrects * 6,
-	             indices, GL_STATIC_DRAW);
+	             indices, GL_STREAM_DRAW);
 
 	glEnableVertexAttribArray(vert_coord_loc);
 	glEnableVertexAttribArray(vert_in_texcoord_loc);
 	glVertexAttribPointer(vert_coord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 4, NULL);
 	glVertexAttribPointer(vert_in_texcoord_loc, 2, GL_INT, GL_FALSE,
 	                      sizeof(GLint) * 4, (void *)(sizeof(GLint) * 2));
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target_fbo);
 	glDrawElements(GL_TRIANGLES, nrects * 6, GL_UNSIGNED_INT, NULL);
 
 	glDisableVertexAttribArray(vert_coord_loc);
@@ -477,8 +469,6 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	glUseProgram(0);
 
 	gl_check_err();
-
-	return;
 }
 
 /// Convert rectangles in X coordinates to OpenGL vertex and texture coordinates
@@ -545,11 +535,12 @@ void x_rect_to_coords(int nrects, const rect_t *rects, coord_t image_dst,
 }
 
 // TODO(yshui) make use of reg_visible
-void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask,
+void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask_data,
                 coord_t mask_dst, const region_t *reg_tgt,
                 const region_t *reg_visible attr_unused, bool lerp) {
-	auto gd = (struct gl_data *)base;
-	struct backend_image *img = image_data;
+	auto gd    = (struct gl_data *)base;
+	auto img   = (struct backend_image *) image_data;
+	auto mask  = (struct backend_image *)mask_data;
 	auto inner = (struct gl_texture *)img->inner;
 
 	// Painting
@@ -570,7 +561,9 @@ void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask
 
 	auto coord = ccalloc(nrects * 16, GLint);
 	auto indices = ccalloc(nrects * 6, GLuint);
-	coord_t mask_offset = {.x = mask_dst.x - image_dst.x, .y = mask_dst.y - image_dst.y};
+	coord_t mask_offset = {.x = mask_dst.x - image_dst.x,
+	                       .y = mask_dst.y - image_dst.y};
+								
 	x_rect_to_coords(nrects, rects, image_dst, inner->height, inner->height,
 	                 gd->height, inner->y_inverted, coord, indices);
 
@@ -582,7 +575,32 @@ void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask
 		}
 	}
 
-	_gl_compose(base, img, gd->back_fbo, mask, mask_offset, coord, indices, nrects);
+	struct backend_mask mask_args = 
+	{
+	    .image = mask ? (image_handle)mask->inner : NULL,
+	    .origin = mask_offset,
+	    .corner_radius = mask ? mask->corner_radius : 0,
+	    .inverted = mask ? mask->color_inverted : false,
+	};
+
+	pixman_region32_init(&mask_args.region);
+
+	struct backend_blit_args blit_args = 
+	{
+	    .source_image = (image_handle)img->inner,
+	    .mask = mask ? &mask_args : NULL,
+	    .shader = (void *)img->shader ?: gd->default_shader,
+	    .opacity = img->opacity,
+	    .color_inverted = img->color_inverted,
+	    .ewidth = img->ewidth,
+	    .eheight = img->eheight,
+	    .dim = img->dim,
+	    .corner_radius = img->corner_radius,
+	    .border_width = img->border_width,
+	    .max_brightness = img->max_brightness,
+	};
+
+	gl_blit_inner(base, gd->back_fbo, &blit_args, coord, indices, nrects);
 
 	free(indices);
 	free(coord);
@@ -644,12 +662,16 @@ void gl_resize(struct gl_data *gd, int width, int height) {
 
 /// Fill a given region in bound framebuffer.
 /// @param[in] y_inverted whether the y coordinates in `clip` should be inverted
-static void _gl_fill(backend_t *base, struct color c, const region_t *clip, GLuint target,
-                     int height, bool y_inverted) {
+static void gl_fill_inner(backend_t *base, struct color c, const region_t *clip, 
+						  GLuint target, int height, bool y_inverted) 
+{
 	static const GLuint fill_vert_in_coord_loc = 0;
 	int nrects;
 	const rect_t *rect = pixman_region32_rectangles((region_t *)clip, &nrects);
 	auto gd = (struct gl_data *)base;
+
+	glUseProgram(gd->fill_shader.prog);
+	glUniform4f(gd->fill_shader.color_loc, (GLfloat)c.red, (GLfloat)c.green, (GLfloat)c.blue, (GLfloat)c.alpha);
 
 	GLuint vao;
 	glGenVertexArrays(1, &vao);
@@ -657,16 +679,13 @@ static void _gl_fill(backend_t *base, struct color c, const region_t *clip, GLui
 
 	GLuint bo[2];
 	glGenBuffers(2, bo);
-	glUseProgram(gd->fill_shader.prog);
-	glUniform4f(gd->fill_shader.color_loc, (GLfloat)c.red, (GLfloat)c.green,
-	            (GLfloat)c.blue, (GLfloat)c.alpha);
-	glEnableVertexAttribArray(fill_vert_in_coord_loc);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
 
 	auto coord = ccalloc(nrects * 8, GLint);
 	auto indices = ccalloc(nrects * 6, GLuint);
-	for (int i = 0; i < nrects; i++) {
+	for (int i = 0; i < nrects; i++) 
+	{
 		GLint y1 = y_inverted ? height - rect[i].y2 : rect[i].y1,
 		      y2 = y_inverted ? height - rect[i].y1 : rect[i].y2;
 		// clang-format off
@@ -683,12 +702,13 @@ static void _gl_fill(backend_t *base, struct color c, const region_t *clip, GLui
 		indices[i * 6 + 4] = (GLuint)i * 4 + 3;
 		indices[i * 6 + 5] = (GLuint)i * 4 + 0;
 	}
-	glBufferData(GL_ARRAY_BUFFER, nrects * 8 * (long)sizeof(*coord), coord, GL_STREAM_DRAW);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, nrects * 6 * (long)sizeof(*indices),
-	             indices, GL_STREAM_DRAW);
 
-	glVertexAttribPointer(fill_vert_in_coord_loc, 2, GL_INT, GL_FALSE,
-	                      sizeof(*coord) * 2, (void *)0);
+	glBufferData(GL_ARRAY_BUFFER, nrects * 8 * (long)sizeof(*coord), coord, GL_STREAM_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, nrects * 6 * (long)sizeof(*indices), indices, GL_STREAM_DRAW);
+
+	glEnableVertexAttribArray(fill_vert_in_coord_loc);
+	glVertexAttribPointer(fill_vert_in_coord_loc, 2, GL_INT, GL_FALSE, sizeof(*coord) * 2, (void *)0);
+	
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
 	glDrawElements(GL_TRIANGLES, nrects * 6, GL_UNSIGNED_INT, NULL);
 
@@ -708,12 +728,16 @@ static void _gl_fill(backend_t *base, struct color c, const region_t *clip, GLui
 
 void gl_fill(backend_t *base, struct color c, const region_t *clip) {
 	auto gd = (struct gl_data *)base;
-	return _gl_fill(base, c, clip, gd->back_fbo, gd->height, true);
+	return gl_fill_inner(base, c, clip, gd->back_fbo, gd->height, true);
 }
 
-void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
+void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) 
+{
 	auto tex = ccalloc(1, struct gl_texture);
-	auto img = default_new_backend_image(size.width, size.height);
+	auto gd = (struct gl_data *)base;
+	auto img = ccalloc(1, struct backend_image);
+	default_init_backend_image(img, size.width, size.height);
+
 	tex->width = size.width;
 	tex->height = size.height;
 	tex->texture = gl_new_texture(GL_TEXTURE_2D);
@@ -729,19 +753,19 @@ void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
 	             GL_UNSIGNED_BYTE, NULL);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	GLuint fbo;
 	glBlendFunc(GL_ONE, GL_ZERO);
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, gd->temp_fbo);
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
 	                       tex->texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 	glClearColor(0, 0, 0, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
-	_gl_fill(base, (struct color){1, 1, 1, 1}, reg, fbo, size.height, false);
+
+	gl_fill_inner(base, (struct color){1, 1, 1, 1}, reg, gd->temp_fbo, size.height, false);
+
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glDeleteFramebuffers(1, &fbo);
+
 	return img;
 }
 
@@ -835,6 +859,7 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
 	glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
+	glGenFramebuffers(1, &gd->temp_fbo);
 	glGenFramebuffers(1, &gd->back_fbo);
 	glGenTextures(1, &gd->back_texture);
 	if (!gd->back_fbo || !gd->back_texture) {
@@ -972,6 +997,9 @@ void gl_deinit(struct gl_data *gd) {
 	glDeleteTextures(1, &gd->default_mask_texture);
  	glDeleteTextures(1, &gd->back_texture);
 
+	glDeleteFramebuffers(1, &gd->temp_fbo);
+	glDeleteFramebuffers(1, &gd->back_fbo);
+
 	gl_check_err();
 }
 
@@ -994,7 +1022,8 @@ GLuint gl_new_texture(GLenum target) {
 }
 
 /// Actually duplicate a texture into a new one, if this texture is shared
-static inline void gl_image_decouple(backend_t *base, struct backend_image *img) {
+static inline void gl_image_decouple(backend_t *base, struct backend_image *img) 
+{
 	if (img->inner->refcount == 1) {
 		return;
 	}
@@ -1018,9 +1047,7 @@ static inline void gl_image_decouple(backend_t *base, struct backend_image *img)
 	glUseProgram(gd->present_prog);
 	glBindTexture(GL_TEXTURE_2D, inner->texture);
 
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
 	                       new_tex->texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
@@ -1080,7 +1107,6 @@ static inline void gl_image_decouple(backend_t *base, struct backend_image *img)
 	glDeleteBuffers(2, bo);
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glDeleteFramebuffers(1, &fbo);
 
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glUseProgram(0);
@@ -1095,29 +1121,33 @@ static void gl_image_apply_alpha(backend_t *base, struct backend_image *img,
                                  const region_t *reg_op, double alpha) {
 	// Result color = 0 (GL_ZERO) + alpha (GL_CONSTANT_ALPHA) * original color
 	auto inner = (struct gl_texture *)img->inner;
+	auto gd = (struct gl_data *)base;
+
 	glBlendFunc(GL_ZERO, GL_CONSTANT_ALPHA);
 	glBlendColor(0, 0, 0, (GLclampf)alpha);
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
-	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-	                       inner->texture, 0);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
+	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, inner->texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	_gl_fill(base, (struct color){0, 0, 0, 0}, reg_op, fbo, inner->height,
-	         !inner->y_inverted);
+
+	gl_fill_inner(base, (struct color){0, 0, 0, 0}, reg_op, gd->temp_fbo,
+				  inner->height, !inner->y_inverted);
+
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glDeleteFramebuffers(1, &fbo);
 }
 
-void gl_present(backend_t *base, const region_t *region) {
+void gl_present(backend_t *base, const region_t *region) 
+{
 	auto gd = (struct gl_data *)base;
 
 	int nrects;
 	const rect_t *rect = pixman_region32_rectangles((region_t *)region, &nrects);
 	auto coord = ccalloc(nrects * 8, GLint);
 	auto indices = ccalloc(nrects * 6, GLuint);
-	for (int i = 0; i < nrects; i++) {
+
+	for (int i = 0; i < nrects; i++) 
+	{
 		// clang-format off
 		memcpy(&coord[i * 8],
 		       ((GLint[]){rect[i].x1, gd->height - rect[i].y2,
@@ -1132,8 +1162,9 @@ void gl_present(backend_t *base, const region_t *region) {
 		       ((GLuint[]){u + 0, u + 1, u + 2, u + 2, u + 3, u + 0}),
 		       sizeof(GLuint) * 6);
 	}
-
+							
 	glUseProgram(gd->present_prog);
+	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, gd->back_texture);
 
 	GLuint vao;
@@ -1142,14 +1173,14 @@ void gl_present(backend_t *base, const region_t *region) {
 
 	GLuint bo[2];
 	glGenBuffers(2, bo);
-	glEnableVertexAttribArray(vert_coord_loc);
 	glBindBuffer(GL_ARRAY_BUFFER, bo[0]);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bo[1]);
 	glBufferData(GL_ARRAY_BUFFER, (long)sizeof(GLint) * nrects * 8, coord, GL_STREAM_DRAW);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(GLuint) * nrects * 6, indices,
-	             GL_STREAM_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)sizeof(GLuint) * nrects * 6, indices, GL_STREAM_DRAW);
 
+	glEnableVertexAttribArray(vert_coord_loc);
 	glVertexAttribPointer(vert_coord_loc, 2, GL_INT, GL_FALSE, sizeof(GLint) * 2, NULL);
+
 	glDrawElements(GL_TRIANGLES, nrects * 6, GL_UNSIGNED_INT, NULL);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -1173,18 +1204,6 @@ bool gl_image_op(backend_t *base, enum image_operations op, void *image_data,
 		break;
 	}
 
-	return true;
-}
-
-bool gl_set_image_property(backend_t *backend_data, enum image_properties prop,
-                           void *image_data, void *args) {
-	if (prop != IMAGE_PROPERTY_CUSTOM_SHADER) {
-		return default_set_image_property(backend_data, prop, image_data, args);
-	}
-
-	struct backend_image *img = image_data;
-	auto inner = (struct gl_texture *)img->inner;
-	inner->shader = args;
 	return true;
 }
 
@@ -1213,7 +1232,8 @@ struct backend_shadow_context *gl_create_shadow_context(backend_t *base, double 
 	return (struct backend_shadow_context *)ctx;
 }
 
-void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shadow_context *ctx) {
+void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shadow_context *ctx) 
+{
 	auto ctx_ = (struct gl_shadow_context *)ctx;
 	if (ctx_->blur_context) {
 		gl_destroy_blur_context(base, (struct backend_blur_context *)ctx_->blur_context);
@@ -1221,10 +1241,11 @@ void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shado
 	free(ctx_);
 }
 
-void *gl_shadow_from_mask(backend_t *base, void *mask,
-                          struct backend_shadow_context *sctx, struct color color) {
+void *gl_shadow_from_mask(backend_t *base, void *mask_data, struct backend_shadow_context *sctx, struct color color) 
+{
 	log_debug("Create shadow from mask");
 	auto gd = (struct gl_data *)base;
+	auto mask = (struct backend_image *)mask_data;
 	auto img = (struct backend_image *)mask;
 	auto inner = (struct gl_texture *)img->inner;
 	auto gsctx = (struct gl_shadow_context *)sctx;
@@ -1236,7 +1257,9 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	new_inner->texture = gl_new_texture(GL_TEXTURE_2D);
 	new_inner->has_alpha = inner->has_alpha;
 	new_inner->y_inverted = true;
-	auto new_img = default_new_backend_image(new_inner->width, new_inner->height);
+
+	auto new_img = ccalloc(1, struct backend_image);
+	default_init_backend_image(new_img, new_inner->width, new_inner->height);
 	new_img->inner = (struct backend_image_inner_base *)new_inner;
 	new_img->inner->refcount = 1;
 
@@ -1250,12 +1273,11 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, new_inner->width, new_inner->height, 0,
 	             GL_RED, GL_UNSIGNED_BYTE, NULL);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
-	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-	                       source_texture, 0);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
+	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, source_texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
 	if (img->color_inverted) {
 		// If the mask is inverted, clear the source_texture to white, so the
 		// "outside" of the mask would be correct
@@ -1263,7 +1285,9 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	} else {
 		glClearColor(0, 0, 0, 1);
 	}
+
 	glClear(GL_COLOR_BUFFER_BIT);
+
 	{
 		// clang-format off
 		// interleaved vertex coordinates and texture coordinates
@@ -1273,7 +1297,23 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 				  radius               , radius + inner->height, 0           , inner->height,};
 		// clang-format on
 		GLuint indices[] = {0, 1, 2, 2, 3, 0};
-		_gl_compose(base, mask, fbo, NULL, (coord_t){0}, coords, indices, 1);
+
+		struct backend_blit_args blit_args = 
+		{
+		    .source_image = (image_handle)mask->inner,
+		    .mask = NULL,
+		    .shader = (void *)mask->shader ?: gd->default_shader,
+		    .opacity = mask->opacity,
+		    .color_inverted = mask->color_inverted,
+		    .ewidth = mask->ewidth,
+		    .eheight = mask->eheight,
+		    .dim = mask->dim,
+		    .corner_radius = mask->corner_radius,
+		    .border_width = mask->border_width,
+		    .max_brightness = mask->max_brightness,
+		};
+
+		gl_blit_inner(base, gd->temp_fbo, &blit_args, coords, indices, 1);
 	}
 
 	gl_check_err();
@@ -1287,21 +1327,22 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 		             new_inner->height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
 		glBindTexture(GL_TEXTURE_2D, 0);
 
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
-		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-		                       GL_TEXTURE_2D, tmp_texture, 0);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
+		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tmp_texture, 0);
 
 		region_t reg_blur;
 		pixman_region32_init_rect(&reg_blur, 0, 0, (unsigned int)new_inner->width,
 		                          (unsigned int)new_inner->height);
+
 		// gl_blur expects reg_blur to be in X coordinate system (i.e. y flipped),
 		// but we are covering the whole texture so we don't need to worry about
 		// that.
-		gl_blur_impl(
+		gl_blur_inner(
 		    1.0, gsctx->blur_context, NULL, (coord_t){0}, &reg_blur, NULL,
 		    source_texture,
 		    (geometry_t){.width = new_inner->width, .height = new_inner->height},
-		    fbo, gd->default_mask_texture);
+		    gd->temp_fbo, gd->default_mask_texture);
+
 		pixman_region32_fini(&reg_blur);
 	}
 
@@ -1311,9 +1352,11 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	glBindTexture(GL_TEXTURE_2D, new_inner->texture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, new_inner->width, new_inner->height, 0,
 	             GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gd->temp_fbo);
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
 	                       new_inner->texture, 0);
+
 	glClearColor(0, 0, 0, 0);
 	glClear(GL_COLOR_BUFFER_BIT);
 
@@ -1360,9 +1403,10 @@ void *gl_shadow_from_mask(backend_t *base, void *mask,
 	if (tmp_texture != source_texture) {
 		glDeleteTextures(1, (GLuint[]){tmp_texture});
 	}
+
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glDeleteFramebuffers(1, &fbo);
 	gl_check_err();
+
 	return new_img;
 }
 

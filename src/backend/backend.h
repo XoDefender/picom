@@ -35,15 +35,6 @@ typedef struct backend_base {
 	// ...
 } backend_t;
 
-typedef struct geometry {
-	int width;
-	int height;
-} geometry_t;
-
-typedef struct coord {
-	int x, y;
-} coord_t;
-
 typedef void (*backend_ready_callback_t)(void *);
 
 // This mimics OpenGL's ARB_robustness extension, which enables detection of GPU context
@@ -117,6 +108,74 @@ struct kernel_blur_args {
 struct dual_kawase_blur_args {
 	int size;
 	int strength;
+};
+
+typedef struct image_handle {
+	// Intentionally left blank
+} *image_handle;
+
+/// A mask for various backend operations.
+///
+/// The mask is composed of both a mask region and a mask image. The resulting mask
+/// is the intersection of the two. The mask image can be modified by the `corner_radius`
+/// and `inverted` properties. Note these properties have no effect on the mask region.
+struct backend_mask 
+{
+	/// Mask image, can be NULL.
+	///
+	/// Mask image must be an image that was created with the format. 
+	/// Using an image with a wrong format as mask is undefined behavior.
+	image_handle image;
+	/// Clip region, in source image's coordinate.
+	region_t region;
+	/// Corner radius of the mask image, the corners of the mask image will be
+	/// rounded.
+	double corner_radius;
+	/// Origin of the mask image, in the source image's coordinate.
+	struct coord origin;
+	/// Whether the mask image should be inverted.
+	bool inverted;
+};
+
+struct backend_blur_args 
+{
+	/// The blur context
+	void *blur_context;
+	/// The mask for the blur operation, cannot be NULL.
+	struct backend_mask *mask;
+	/// Source image
+	image_handle source_image;
+	/// Opacity of the blurred image
+	double opacity;
+};
+
+struct backend_blit_args 
+{
+	/// Source image, can be NULL.
+	image_handle source_image;
+	/// Mask for the source image. Cannot be NULL.
+	struct backend_mask *mask;
+	/// Custom shader for this blit operation.
+	void *shader;
+	/// Opacity of the source image.
+	double opacity;
+	/// Dim level of the source image.
+	double dim;
+	/// Brightness limit of the source image. Source image
+	/// will be normalized so that the maximum brightness is
+	/// this value.
+	double max_brightness;
+	/// Corner radius of the source image. The corners of
+	/// the source image will be rounded.
+	double corner_radius;
+	/// Effective size of the source image, set where the corners
+	/// of the image are.
+	int ewidth, eheight;
+	/// Border width of the source image. This is used with
+	/// `corner_radius` to create a border for the rounded corners.
+	int border_width;
+	/// Whether the source image should be inverted.
+	bool color_inverted;
 };
 
 struct backend_operations {
@@ -366,5 +425,5 @@ struct backend_operations {
 
 extern struct backend_operations *backend_list[];
 
-void paint_all_new(session_t *ps, struct managed_win *const t, bool ignore_damage)
+void paint_all_new(session_t *ps, bool ignore_damage)
     attr_nonnull(1);

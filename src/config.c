@@ -926,10 +926,14 @@ void set_default_winopts(options_t *opt, win_option_mask_t *mask, bool shadow_en
 char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
                    bool *fading_enable, bool *hasneg, win_option_mask_t *winopt_mask) {
 	// clang-format off
-	*opt = (struct options){
-	    .backend = BKEND_XRENDER,
+	*opt = (struct options)
+	{
+	    .backend = BKEND_GLX,
 	    .legacy_backends = false,
-	    .glx_no_stencil = false,
+	    .glx_no_stencil = true,
+		.glx_no_rebind_pixmap = true,
+		.force_glx = false,
+
 	    .mark_wmwin_focused = false,
 	    .mark_ovredir_focused = false,
 	    .detect_rounded_corners = false,
@@ -1001,8 +1005,7 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 	    .track_leader = false,
 
 	    .rounded_corners_blacklist = NULL,
-
-		.corners_rounding_rules = NULL, // Kirill
+		.corners_rounding_rules = NULL,
 
 		.animations = false,
 	    .animation_for_open_window = OPEN_WINDOW_ANIMATION_NONE,
@@ -1012,8 +1015,6 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 	    .animation_window_mass = 1.0,
 	    .animation_dampening = 25,
 	    .animation_clamping = true,
-
-		.force_glx = false,
 	};
 	// clang-format on
 

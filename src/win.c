@@ -539,6 +539,9 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->aWM_CLASS)) {
 		if (win_update_class(ps, w)) {
 			win_set_flags(w, WIN_FLAGS_FACTOR_CHANGED);
+
+			if(!ps->switcher_win && !strcmp(w->class_instance, "FlySwitcher"))
+				ps->switcher_win = w;
 		}
 	}
 
@@ -890,6 +893,13 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 
 			w->animation_progress = 0.0;
 		} else {
+			// TODO:Kirill - need to work around (fixes incorrect size change on "WIN_FLAGS_ANIMATION_BLACKLIST_OUT | WIN_FLAGS_ANIMATION_BLACKLIST_IN")
+			if(w->animation_inv_og_distance && (w->g.width != w->pending_g.width || w->g.height != w->pending_g.height))
+			{
+				win_set_flags(w, WIN_FLAGS_SIZE_STALE);
+				w->animation_inv_og_distance = 0;
+			}
+
 			w->g = w->pending_g;
 		}
 
@@ -2181,9 +2191,8 @@ void win_on_factor_change(session_t *ps, struct managed_win *w) {
 	}
 
 	w->fade_excluded = c2_match(ps, w, ps->o.fade_blacklist, NULL);
-
-	w->transparent_clipping_excluded =
-	    c2_match(ps, w, ps->o.transparent_clipping_blacklist, NULL);
+	w->transparent_clipping = ps->o.transparent_clipping && 
+							  !c2_match(ps, w, ps->o.transparent_clipping_blacklist, NULL);
 
 	win_update_opacity_target(ps, w);
 
@@ -2563,7 +2572,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    .rounded_corners = false,
 	    .paint_excluded = false,
 	    .fade_excluded = false,
-	    .transparent_clipping_excluded = false,
+	    .transparent_clipping = false,
 	    .unredir_if_possible_excluded = false,
 	    .prop_shadow = -1,
 	    // following 4 are set in win_mark_client
@@ -2731,6 +2740,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 		cdbus_ev_win_added(ps, &new->base);
 	}
 #endif
+
 	return &new->base;
 }
 
@@ -2907,7 +2917,7 @@ void wins_update_shadow_states(session_t *ps, struct managed_win *old_active_win
 	}
 
 	// TODO:Kirill - maybe use only root_damaged(ps)
-	// need tranfer this call somewhere
+	// need transfer this call somewhere
 	if(ps->o.backend == BKEND_XRENDER)
 		force_repaint(ps);
 }
@@ -3319,6 +3329,9 @@ static void destroy_win_finish(session_t *ps, struct win *w) {
 			          w->id, mw->name);
 			ps->active_win = NULL;
 		}
+
+		if(mw == ps->switcher_win)
+			ps->switcher_win = NULL;
 
 		free_win_res(ps, mw);
 

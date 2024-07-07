@@ -175,6 +175,11 @@ typedef struct session {
 	/// Shaders
 	struct shader_info *shaders;
 
+	// Manager for layouts and inner layers
+	struct layout_manager *layout_manager;
+
+	bool legacy_backend_ready; // TODO:Kirill - tmp addition
+
 	// === Display related ===
 	/// Whether the X server is grabbed by us
 	bool server_grabbed;
@@ -208,6 +213,9 @@ typedef struct session {
 	paint_t root_tile_paint;
 	/// The backend data the root pixmap bound to
 	void *root_image;
+	/// The root pixmap generation, incremented everytime
+	/// the root pixmap changes
+	uint64_t root_image_generation;
 	/// A region of the size of the screen.
 	region_t screen_reg;
 	/// Picture of root window. Destination of painting in no-DBE painting
@@ -249,6 +257,8 @@ typedef struct session {
 	region_t *damage;
 	/// The region damaged on the last paint.
 	region_t *damage_ring;
+	/// Whether the root image has been changed since last render
+	bool root_damaged;
 	/// Number of damage regions we track
 	int ndamage;
 	/// Whether all windows are currently redirected.
@@ -296,6 +306,8 @@ typedef struct session {
 	/// Window ID of leader window of currently active window. Used for
 	/// subsidiary window detection.
 	xcb_window_t active_leader;
+	
+	struct managed_win* switcher_win;
 
 	// === Shadow/dimming related ===
 	/// 1x1 black Picture.
@@ -485,7 +497,7 @@ static inline bool bkend_use_xrender(session_t *ps) {
  * Check if the backend is initialized.
  */
 static inline bool is_bkend_ready(struct session *ps) {
-	return ps->backend_data || ps->psglx;
+	return ps->backend_data || ps->legacy_backend_ready;
 }
 
 static void set_ignore(session_t *ps, unsigned long sequence) {

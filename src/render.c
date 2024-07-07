@@ -1485,6 +1485,9 @@ bool init_render(session_t *ps) {
 		assert(false);
 #endif
 	}
+
+	ps->legacy_backend_ready = true;
+
 	return true;
 }
 
@@ -1534,6 +1537,8 @@ void deinit_render(session_t *ps) {
 		}
 		free(ps->blur_kerns_cache);
 	}
+
+	ps->legacy_backend_ready = false;
 }
 
 // vim: set ts=8 sw=8 noet :
