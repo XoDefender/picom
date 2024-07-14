@@ -14,19 +14,16 @@
 
 bool is_software_render(enum driver driver)
 {
-	return driver & DRIVER_LLVMPIPE || driver & DRIVER_SOFTPIPE || driver & DRIVER_SWRAST;
+	return driver & DRIVER_LLVMPIPE 
+		|| driver & DRIVER_SOFTPIPE 
+		|| driver & DRIVER_SWRAST;
 }
 
 /// Apply driver specified global workarounds. It's safe to call this multiple times.
 void apply_driver_workarounds(struct session *ps) 
 {
-	bool force_xrender = false;
-	#ifdef ELBRUS
-		force_xrender = true;
-	#endif
-
-	if (!is_bkend_ready(ps) && !ps->o.force_glx /*&& is_software_render(ps->drivers)*/
-		&& (getenv("FLY_VM_NAME") || force_xrender)) { // tmp workaround over vms
+	if (!is_bkend_ready(ps) && !ps->o.force_glx 
+		&& is_software_render(ps->drivers)) { 
 		ps->o.backend = BKEND_XRENDER;
 	} 
 
@@ -90,6 +87,7 @@ void detect_driver_ddx(xcb_connection_t *c, xcb_window_t window, enum driver* re
 	free(randr_version);
 }
 
+// TODO(XoDefender): Free glcontext data fully
 void detect_driver_opengl(session_t *ps, enum driver* ret) 
 {
 	if(is_bkend_ready(ps)) {
@@ -128,7 +126,7 @@ enum driver detect_driver(struct session *ps)
 	enum driver ret = 0;
 	
 	detect_driver_ddx(ps->c, ps->root, &ret);
-	// detect_driver_opengl(ps, &ret);
+	detect_driver_opengl(ps, &ret);
 
 	if (ps->backend_data && ps->backend_data->ops->detect_driver) {
 		ret |= ps->backend_data->ops->detect_driver(ps->backend_data);

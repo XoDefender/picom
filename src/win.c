@@ -539,9 +539,6 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->aWM_CLASS)) {
 		if (win_update_class(ps, w)) {
 			win_set_flags(w, WIN_FLAGS_FACTOR_CHANGED);
-
-			if(!ps->switcher_win && !strcmp(w->class_instance, "FlySwitcher"))
-				ps->switcher_win = w;
 		}
 	}
 
@@ -3329,9 +3326,6 @@ static void destroy_win_finish(session_t *ps, struct win *w) {
 			          w->id, mw->name);
 			ps->active_win = NULL;
 		}
-
-		if(mw == ps->switcher_win)
-			ps->switcher_win = NULL;
 
 		free_win_res(ps, mw);
 
