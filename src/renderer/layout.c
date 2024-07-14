@@ -23,9 +23,6 @@ layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometr
 	if (!w->ever_damaged || w->paint_excluded) {
 		goto out;
 	}
-	if (w->win_image == NULL) {
-		goto out;
-	}
 
 	out_layer->origin = (struct coord){.x = w->g.x, .y = w->g.y};
 	out_layer->size = (struct geometry){.width = w->widthb, .height = w->heightb};

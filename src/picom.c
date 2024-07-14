@@ -1790,7 +1790,7 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 			layout_manager_append_layout(ps->layout_manager, &ps->window_stack, ps->root_image_generation,
 			    						(struct geometry){.width = ps->root_width, .height = ps->root_height});
 
-			paint_all_new(ps, false);
+			paint_all_new(ps, bkend_use_xrender(ps) && ps->active_win == ps->switcher_win);
 		} 
 		else {
 			paint_all(ps, bottom, false);
@@ -1963,6 +1963,8 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	    .windows = NULL,
 	    .active_win = NULL,
 	    .active_leader = XCB_NONE,
+
+		.switcher_win = NULL,
 
 	    .black_picture = XCB_NONE,
 	    .cshadow_picture = XCB_NONE,

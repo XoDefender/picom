@@ -15,6 +15,8 @@ compton
 build/
 compile_commands.json
 build.ninja
+.pc/
+debian/
 
 # language servers
 .ccls-cache

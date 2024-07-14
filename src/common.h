@@ -307,6 +307,8 @@ typedef struct session {
 	/// subsidiary window detection.
 	xcb_window_t active_leader;
 	
+	struct managed_win* switcher_win;
+
 	// === Shadow/dimming related ===
 	/// 1x1 black Picture.
 	xcb_render_picture_t black_picture;
