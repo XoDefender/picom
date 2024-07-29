@@ -2918,8 +2918,7 @@ void wins_update_shadow_states(session_t *ps, struct managed_win *old_active_win
 
 	// TODO:Kirill - maybe use only root_damaged(ps)
 	// need transfer this call somewhere
-	if(ps->o.backend == BKEND_XRENDER)
-		force_repaint(ps);
+	force_repaint(ps);
 }
 
 /**

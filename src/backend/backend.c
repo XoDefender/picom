@@ -457,7 +457,9 @@ void paint_all_new(session_t *ps, bool ignore_damage)
 	// First need to imitate the depth test on CPU
 	// to decide whether to pass the window to the rendering pipeline
 	if(bkend_use_glx(ps)) {
-		layout_manager_mark_obscured_layers(ps->layout_manager, &reg_paint);
+		// TODO:Kirill - best way is to pass only the damaged region,
+		// now it causes shadow artifacts, so pass the screen_reg
+		layout_manager_mark_obscured_layers(ps->layout_manager, &ps->screen_reg);
 	}
 	for(unsigned int i = 0; i < layout_manager_layout(ps->layout_manager, 0)->len; i++)
 	{
