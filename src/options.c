@@ -699,7 +699,10 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		P_CASEBOOL(319, no_x_selection);
 		P_CASEBOOL(323, use_damage);
 		case 324: opt->use_damage = false; break;
-		case 325: opt->vsync = false; break;
+		case 325: 
+			opt->vsync = false; 
+			opt->force_no_vsync = true;
+			break;
 		case 326:
 			opt->max_brightness = atof(optarg);
 			break;
@@ -956,6 +959,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 	}
 
 	condlst_add(&opt->shadow_blacklist, "name = 'XOSD'"); //alex: hardcode it
+	condlst_add(&opt->shadow_blacklist, "class_g = 'fly-reflex-service'");
 
 	// Apply default wintype options that are dependent on global options
 	set_default_winopts(opt, winopt_mask, shadow_enable, fading_enable,

@@ -29,17 +29,14 @@ enum driver {
 	DRIVER_NOUVEAU = 16,
 	DRIVER_INTEL = 32,
 	DRIVER_MODESETTING = 64,
-	DRIVER_LLVMPIPE = 128,
-	DRIVER_SOFTPIPE = 256,
-	DRIVER_PANFROST = 512,
-	DRIVER_SWRAST = 1024,
-	DRIVER_UNKNOWN = 2048,
+	DRIVER_SOFTWARE = 128,
+	DRIVER_LEGACY_GL = 256,
+	DRIVER_UNKNOWN = 512,
 };
 
 static const char *driver_names[] = {
-    "AMDGPU", "Radeon", "fglrx", "NVIDIA", "nouveau",
-	"Intel", "modesetting", "llvmpipe", "softpipe", "Panfrost",
-	"Software rasterizer",
+    "AMDGPU", "Radeon", "fglrx", "NVIDIA", "nouveau", "Intel",
+	"modesetting", "llvmpipe", "Software Rasterizer", "softpipe",
 };
 
 /// Return a list of all drivers currently in use by the X server.

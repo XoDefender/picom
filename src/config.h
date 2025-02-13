@@ -342,6 +342,7 @@ typedef struct options {
 	c2_lptr_t *transparent_clipping_blacklist;
 
 	bool force_glx;
+	bool force_no_vsync;
 } options_t;
 
 extern const char *const BACKEND_STRS[NUM_BKEND + 1];

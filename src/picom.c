@@ -2249,16 +2249,6 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		}
 	}
 
-	if (ps->o.legacy_backends) {
-		ps->shadow_context =
-		    (void *)gaussian_kernel_autodetect_deviation(ps->o.shadow_radius);
-		sum_kernel_preprocess((conv *)ps->shadow_context);
-
-		ps->shadow_context_active =
-		    (void *)gaussian_kernel_autodetect_deviation(ps->o.shadow_radius_active);
-		sum_kernel_preprocess((conv *)ps->shadow_context_active);
-	}
-
 	rebuild_shadow_exclude_reg(ps);
 
 	// Query X Shape
@@ -2341,7 +2331,7 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		ext_info = xcb_get_extension_data(ps->c, &xcb_xinerama_id);
 		ps->xinerama_exists = ext_info && ext_info->present;
 	}
-
+	
 	rebuild_screen_reg(ps);
 
 	bool compositor_running = false;
@@ -2397,6 +2387,16 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 
 	ps->drivers = detect_driver(ps);
 	apply_driver_workarounds(ps);
+
+	if (ps->o.legacy_backends) {
+		ps->shadow_context =
+		    (void *)gaussian_kernel_autodetect_deviation(ps->o.shadow_radius);
+		sum_kernel_preprocess((conv *)ps->shadow_context);
+
+		ps->shadow_context_active =
+		    (void *)gaussian_kernel_autodetect_deviation(ps->o.shadow_radius_active);
+		sum_kernel_preprocess((conv *)ps->shadow_context_active);
+	}
 
 	// Initialize filters, must be preceded by OpenGL context creation
 	if (ps->o.legacy_backends && !init_render(ps)) {
