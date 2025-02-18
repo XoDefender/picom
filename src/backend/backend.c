@@ -323,11 +323,10 @@ draw_win_to_back_buffer(session_t *ps, struct managed_win *w, coord_t window_coo
 }
 
 /// paint all windows
-void paint_all_new(session_t *ps, bool ignore_damage) 
+void paint_all_new(session_t *ps, struct managed_win *bottom, bool ignore_damage) 
 {
 	struct timespec now = get_time_timespec();
 	auto paint_all_start_us = (uint64_t)now.tv_sec * 1000000UL + (uint64_t)now.tv_nsec / 1000;
-	struct managed_win* bottom = layout_manager_layout(ps->layout_manager, 0)->layers[0].win;
 
 	if (ps->backend_data->ops->device_status &&
 	    ps->backend_data->ops->device_status(ps->backend_data) != DEVICE_STATUS_NORMAL) {
@@ -456,11 +455,10 @@ void paint_all_new(session_t *ps, bool ignore_damage)
 	//
 	// First need to imitate the depth test on CPU
 	// to decide whether to pass the window to the rendering pipeline
-	if(bkend_use_glx(ps)) {
-		// TODO:Kirill - best way is to pass only the damaged region,
-		// now it causes shadow artifacts, so pass the screen_reg
-		layout_manager_mark_obscured_layers(ps->layout_manager, &ps->screen_reg);
-	}
+	
+	// TODO:Kirill - best way is to pass only the damaged region,
+	// now it causes shadow artifacts, so pass the screen_reg
+	layout_manager_mark_obscured_layers(ps->layout_manager, &ps->screen_reg);
 	for (auto w = bottom; w; w = w->prev_trans)
 	{
 		// Process obscured windows

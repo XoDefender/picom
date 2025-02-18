@@ -1789,7 +1789,8 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 	}
 
 	// If the screen is unredirected, free all_damage to stop painting
-	if (ps->redirected && ps->o.stoppaint_force != ON) {
+	if (ps->redirected && ps->o.stoppaint_force != ON) 
+	{
 		static int paint = 0;
 
 		log_trace("Render start, frame %d", paint);
@@ -1798,7 +1799,7 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 			layout_manager_append_layout(ps->layout_manager, &ps->window_stack, ps->root_image_generation,
 			    						(struct geometry){.width = ps->root_width, .height = ps->root_height});
 
-			paint_all_new(ps, bkend_use_xrender(ps) && ps->active_win == ps->switcher_win);
+			paint_all_new(ps, bottom, bkend_use_xrender(ps) && ps->active_win == ps->switcher_win);
 		} 
 		else {
 			paint_all(ps, bottom, false);
