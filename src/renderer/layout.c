@@ -200,6 +200,7 @@ void layout_manager_mark_obscured_layers(struct layout_manager *lm, region_t *re
 		pixman_region32_intersect(&reg_bound_curr, &reg_bound_curr, &lm->scratch_region);
 		if(!pixman_region32_not_empty(&reg_bound_curr)) {
 			curr_layer->to_paint = false;
+			curr_layer->win->to_paint = false;
 		}
 
 		if(curr_layer->is_opaque) {

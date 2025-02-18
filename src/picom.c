@@ -1007,11 +1007,15 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 		// Give up if it's not damaged or invisible, or it's unmapped and its
 		// pixmap is gone (for example due to a ConfigureNotify), or when it's
 		// excluded
-		if (w->state == WSTATE_UNMAPPED ||
-		    unlikely(w->base.id == ps->debug_window ||
-		             w->client_win == ps->debug_window)) {
+		if (w->state == WSTATE_UNMAPPED) {
 			to_paint = false;
-		} else if (!w->ever_damaged && w->state != WSTATE_UNMAPPING &&
+		} 
+		else if (unlikely(ps->debug_window != XCB_NONE) &&
+		        (w->base.id == ps->debug_window ||
+		        w->client_win == ps->debug_window)) {
+				to_paint = false;
+		}
+		else if (!w->ever_damaged && w->state != WSTATE_UNMAPPING &&
 		           w->state != WSTATE_DESTROYING) {
 			// Unmapping clears w->ever_damaged, but the fact that the window
 			// is fading out means it must have been damaged when it was still
@@ -1021,13 +1025,15 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 			          "not received any damages",
 			          w->base.id, w->name);
 			to_paint = false;
-		} else if (unlikely(w->g.x + w->g.width < 1 || w->g.y + w->g.height < 1 ||
+		} 
+		else if (unlikely(w->g.x + w->g.width < 1 || w->g.y + w->g.height < 1 ||
 		                    w->g.x >= ps->root_width || w->g.y >= ps->root_height)) {
 			log_trace("Window %#010x (%s) will not be painted because it is "
 			          "positioned outside of the screen",
 			          w->base.id, w->name);
 			to_paint = false;
-		} else if (unlikely((double)w->opacity * MAX_ALPHA < 1 && !w->blur_background)) {
+		} 
+		else if (unlikely((double)w->opacity * MAX_ALPHA < 1 && !w->blur_background)) {
 			/* TODO(yshui) for consistency, even a window has 0 opacity, we
 			 * still probably need to blur its background, so to_paint
 			 * shouldn't be false for them. */
@@ -1035,12 +1041,14 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 			          "0 opacity",
 			          w->base.id, w->name);
 			to_paint = false;
-		} else if (w->paint_excluded) {
+		} 
+		else if (w->paint_excluded) {
 			log_trace("Window %#010x (%s) will not be painted because it is "
 			          "excluded from painting",
 			          w->base.id, w->name);
 			to_paint = false;
-		} else if (unlikely((w->flags & WIN_FLAGS_IMAGE_ERROR) != 0)) {
+		} 
+		else if (unlikely((w->flags & WIN_FLAGS_IMAGE_ERROR) != 0)) {
 			log_trace("Window %#010x (%s) will not be painted because it has "
 			          "image errors",
 			          w->base.id, w->name);
