@@ -943,6 +943,7 @@ bool win_should_change_shadow_state(session_t *ps, struct managed_win *w, bool f
 {
 	if(!w) return false;
 	if(!ps->o.shadow_active || !ps->o.wintype_option[w->window_type].shadow_active) return false;
+	if(w->state == WSTATE_UNMAPPING || w->state == WSTATE_DESTROYING) return false;
 
 	if(focused && w->focused) return true;
 	else if(!focused && !w->focused) return true;
@@ -2226,14 +2227,16 @@ struct shadow_geometry win_get_shadow_geometry(session_t *ps, struct managed_win
 
 void win_update_shadow_geometry(session_t *ps, struct managed_win *w)
 {
-	struct shadow_geometry geometry = win_get_shadow_geometry(ps, w);
+	if(w->state != WSTATE_UNMAPPING && w->state != WSTATE_DESTROYING) {
+		w->shadow_g = win_get_shadow_geometry(ps, w);
+	}
 
-	w->shadow_dx = geometry.offset_x;
-	w->shadow_dy = geometry.offset_y;
+	w->shadow_dx = w->shadow_g.offset_x;
+	w->shadow_dy = w->shadow_g.offset_y;
 	w->widthb = w->g.width + w->g.border_width * 2;
 	w->heightb = w->g.height + w->g.border_width * 2;
-	w->shadow_width = w->widthb + geometry.radius * 2;
-	w->shadow_height = w->heightb + geometry.radius * 2;
+	w->shadow_width = w->widthb + w->shadow_g.radius * 2;
+	w->shadow_height = w->heightb + w->shadow_g.radius * 2;
 }
 
 /**
@@ -2247,6 +2250,7 @@ void win_on_win_size_change(session_t *ps, struct managed_win *w) {
 
 	// Invalidate the shadow we built
 	win_update_shadow_geometry(ps, w);
+
 	win_set_flags(w, WIN_FLAGS_IMAGES_STALE);
 	win_release_mask(ps->backend_data, w);
 	ps->pending_updates = true;
@@ -2535,6 +2539,10 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    .shadow_width = 0,
 	    .shadow_height = 0,
 	    .damage = XCB_NONE,
+
+		.shadow_g.offset_x = 0,
+		.shadow_g.offset_y = 0,
+		.shadow_g.radius = 0,
 
 		.shadow_color.red = NAN,
 		.shadow_color.green = NAN,

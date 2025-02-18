@@ -286,6 +286,8 @@ struct managed_win {
 	margin_t frame_extents;
 
 	// Shadow-related members
+	// Window base shadow geometry data
+	struct shadow_geometry shadow_g;
 	/// Whether a window has shadow. Calculated.
 	bool shadow;
 	/// Override value of window shadow state. Set by D-Bus method calls.
