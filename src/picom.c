@@ -1054,6 +1054,9 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 			          w->base.id, w->name);
 			to_paint = false;
 		}
+		else if(w->is_obscured) {
+			to_paint = false;
+		}
 		// log_trace("%s %d %d %d", w->name, to_paint, w->opacity,
 		// w->paint_excluded);
 

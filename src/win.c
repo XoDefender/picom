@@ -2505,6 +2505,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    // The following ones are updated during paint or paint preprocess
 	    .shadow_opacity = 0.0,
 	    .to_paint = false,
+		.is_obscured = false,
 	    .frame_opacity = 1.0,
 	    .dim = false,
 	    .invert_color = false,

@@ -185,6 +185,8 @@ struct managed_win {
 	bool rounded_corners;
 	/// Whether this window is to be painted.
 	bool to_paint;
+	/// Whether this window is overlapped.
+	bool is_obscured;
 	/// Whether the window is painting excluded.
 	bool paint_excluded;
 	/// Whether the window is unredirect-if-possible excluded.

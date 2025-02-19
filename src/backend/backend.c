@@ -455,15 +455,14 @@ void paint_all_new(session_t *ps, struct managed_win *bottom, bool ignore_damage
 	//
 	// First need to imitate the depth test on CPU
 	// to decide whether to pass the window to the rendering pipeline
-	if(bkend_use_glx(ps)) { // High CPU usage with xrender
-		// TODO:Kirill - best way is to pass only the damaged region,
-		// now it causes shadow artifacts, so pass the screen_reg
-		layout_manager_mark_obscured_layers(ps->layout_manager, &ps->screen_reg);
-	}
+	//
+	// TODO:Kirill best way is to pass only the damaged region,
+	// now it causes shadow artifacts, so pass the screen_reg
+	layout_manager_mark_obscured_layers(ps->layout_manager, &ps->screen_reg);
 	for (auto w = bottom; w; w = w->prev_trans)
 	{
 		// Process obscured windows
-		if(!w->to_paint) { continue; }
+		if(w->is_obscured) { continue; }
 
 		pixman_region32_subtract(&reg_visible, &ps->screen_reg, w->reg_ignore);
 		assert(!(w->flags & WIN_FLAGS_IMAGE_ERROR));
