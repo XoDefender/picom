@@ -744,7 +744,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 	//             process fading or animation for it.
 	win_stack_foreach_managed_safe(w, &ps->window_stack) {
 		const winmode_t mode_old = w->mode;
-		const bool was_painted = w->to_paint;
+		const bool was_painted = w->to_paint && !w->is_obscured;
 		const double opacity_old = w->opacity;
 
 		// IMPORTANT: These window animation steps must happen before any other
@@ -995,7 +995,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 		__label__ skip_window;
 		bool to_paint = true;
 		// w->to_paint remembers whether this window is painted last time
-		const bool was_painted = w->to_paint;
+		const bool was_painted = w->to_paint && !w->is_obscured;
 
 		// Destroy reg_ignore if some window above us invalidated it
 		if (!reg_ignore_valid) {
