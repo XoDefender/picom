@@ -197,9 +197,14 @@ void layout_manager_mark_obscured_layers(struct layout_manager *lm, region_t *re
 		auto curr_layer = &layout_manager_layout(lm, 0)->layers[i];
 		auto reg_bound_curr = win_get_bounding_shape_global_by_val(curr_layer->win);
 
+		curr_layer->win->is_obscured = false;
+
 		pixman_region32_intersect(&reg_bound_curr, &reg_bound_curr, &lm->scratch_region);
 		if(!pixman_region32_not_empty(&reg_bound_curr)) {
 			curr_layer->to_paint = false;
+			// TODO:Kirill dont change window states 
+			// after full switch to layout system
+			curr_layer->win->is_obscured = true;
 		}
 
 		if(curr_layer->is_opaque) {

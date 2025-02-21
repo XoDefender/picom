@@ -185,6 +185,8 @@ struct managed_win {
 	bool rounded_corners;
 	/// Whether this window is to be painted.
 	bool to_paint;
+	/// Whether this window is overlapped.
+	bool is_obscured;
 	/// Whether the window is painting excluded.
 	bool paint_excluded;
 	/// Whether the window is unredirect-if-possible excluded.
@@ -286,6 +288,8 @@ struct managed_win {
 	margin_t frame_extents;
 
 	// Shadow-related members
+	// Window base shadow geometry data
+	struct shadow_geometry shadow_g;
 	/// Whether a window has shadow. Calculated.
 	bool shadow;
 	/// Override value of window shadow state. Set by D-Bus method calls.
