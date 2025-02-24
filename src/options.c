@@ -960,6 +960,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 
 	condlst_add(&opt->shadow_blacklist, "name = 'XOSD'"); //alex: hardcode it
 	condlst_add(&opt->shadow_blacklist, "class_g = 'fly-reflex-service'");
+	condlst_add(&opt->rounded_corners_blacklist, "class_g = 'Yandex-browser'");
 
 	// Apply default wintype options that are dependent on global options
 	set_default_winopts(opt, winopt_mask, shadow_enable, fading_enable,
