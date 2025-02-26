@@ -134,6 +134,8 @@ void detect_driver_opengl(session_t *ps, enum driver* ret)
 
 	if(renderer && vendor) 
 	{
+		// Gallium drivers
+    	// ====================================================
 		for (size_t i = 0; i < ARR_SIZE(software_renderers); i++) 
 		{
 			if (strstr(renderer, software_renderers[i])) {
@@ -142,14 +144,19 @@ void detect_driver_opengl(session_t *ps, enum driver* ret)
 			}
 		}
 
-		if(strstr(vendor, "nouveau")) {
+		if(strstr(vendor, "nouveau") || (strstr(vendor, "Mesa") && 
+		  (strstr(renderer, "NV")    || strstr(renderer, "GeForce")))) {
 			*ret |= DRIVER_NOUVEAU;
 		}
 
-		if(strstr(vendor, "Intel")) {
+		// Mesa classic drivers
+		// ====================================================
+		else if(strstr(vendor, "Intel") || strstr(renderer, "Intel")) {
 			*ret |= DRIVER_INTEL;
 		}
 
+		// GL version
+		// ====================================================
 		GLint major = 0, minor = 0; 
 		glGetIntegerv(GL_MAJOR_VERSION, &major); 
 		glGetIntegerv(GL_MINOR_VERSION, &minor);
