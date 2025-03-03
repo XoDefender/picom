@@ -714,12 +714,12 @@ static void animation_timer_callback(EV_P attr_unused, ev_timer *w, int revents 
 }
 
 static struct managed_win *
-paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
+paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 	// XXX need better, more general name for `fade_running`. It really
 	// means if fade is still ongoing after the current frame is rendered
 	struct managed_win *bottom = NULL;
 	*fade_running = false;
-	*animation = false;
+	*animation_running = false;
 
 	// Fading step calculation
 	long long steps = 0L;
@@ -934,7 +934,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 				w->animation_velocity_h = 0.0;
 				w->opacity = win_calc_opacity_target(ps, w);
 			}
-			*animation = true;
+			*animation_running = true;
 		}
 
 		if (win_should_dim(ps, w) != w->dim) {
@@ -944,7 +944,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 
 		if (w->fg_shader && (w->fg_shader->attributes & SHADER_ATTRIBUTE_ANIMATED)) {
 			add_damage_from_win(ps, w);
-			*animation = true;
+			*animation_running = true;
 		}
 
 		// Run fading
@@ -981,8 +981,9 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation) {
 		}
 	}
 
-	if (animation)
+	if (animation_running) {
 		ps->animation_time = now;
+	}
 
 	// Opacity will not change, from now on.
 	rc_region_t *last_reg_ignore = rc_region_new();
@@ -1755,9 +1756,9 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 	 * screen is not redirected. its sole purpose should be to decide whether the
 	 * screen should be redirected. */
 	bool fade_running = false;
-	bool animation = false;
+	bool animation_running = false;
 	bool was_redirected = ps->redirected;
-	auto bottom = paint_preprocess(ps, &fade_running, &animation);
+	auto bottom = paint_preprocess(ps, &fade_running, &animation_running);
 	ps->tmout_unredir_hit = false;
 
 	if (!was_redirected && ps->redirected) {
@@ -1781,9 +1782,9 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 	}
 
 	// Kirill - Start/stop animation timer depends on whether windows are animating
-	if (!animation && ev_is_active(&ps->animation_timer)) {
+	if (!animation_running && ev_is_active(&ps->animation_timer)) {
 		ev_timer_stop(EV_A_ & ps->animation_timer);
-	} else if (animation && !ev_is_active(&ps->animation_timer)) {
+	} else if (animation_running && !ev_is_active(&ps->animation_timer)) {
 		ev_timer_set(&ps->animation_timer, 0, 0);
 		ev_timer_start(EV_A_ & ps->animation_timer);
 	}
@@ -1816,14 +1817,14 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 	if (!fade_running) {
 		ps->fade_time = 0L;
 	}
-	if (!animation) {
+	if (!animation_running) {
 		ps->animation_time = 0L;
 	}
 
+	ps->redraw_needed = false;
+
 	// TODO(yshui) Investigate how big the X critical section needs to be. There are
 	// suggestions that rendering should be in the critical section as well.
-
-	ps->redraw_needed = animation;
 }
 
 static void draw_callback(EV_P_ ev_idle *w, int revents) {
