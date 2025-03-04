@@ -3792,13 +3792,17 @@ void win_update_opacity_target(session_t *ps, struct managed_win *w)
 	if (w->state == WSTATE_MAPPED) {
 		// Opacity target changed while MAPPED. Transition to FADING.
 		w->state = WSTATE_FADING;
-	} else if (w->state == WSTATE_MAPPING) {
+	} 
+	else if (w->state == WSTATE_MAPPING) 
+	{
 		// Opacity target changed while fading in, keep the blur_opacity
 		// in lock step with the opacity
+		w->number_of_animations++;
 		animatable_set_target(&w->blur_opacity, w->blur_opacity.target, duration,
 							  win_transition_callback, w);
 		log_debug("Opacity changed while fading in");
-	} else if (w->state == WSTATE_FADING) {
+	} 
+	else if (w->state == WSTATE_FADING) {
 		// Opacity target changed while FADING.
 		log_debug("Opacity changed while already fading");
 	}
