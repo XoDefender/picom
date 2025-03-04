@@ -32,6 +32,8 @@ struct layer {
 	struct geometry shadow_size;
 	/// Opacity of this window
 	float opacity;
+	/// Opacity of the background blur of this window
+	float blur_opacity;
 
 	/// How many commands are needed to render this layer
 	unsigned number_of_commands;

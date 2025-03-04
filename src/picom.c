@@ -38,6 +38,7 @@
 #include "err.h"
 #include "kernel.h"
 #include "picom.h"
+#include "transition.h"
 #ifdef CONFIG_OPENGL
 #include "opengl.h"
 #endif
@@ -243,19 +244,26 @@ static double fade_timeout(session_t *ps) {
  * @param steps steps of fading
  * @return whether we are still in fading mode
  */
-static bool run_fade(session_t *ps, struct managed_win **_w, long long steps) {
+static bool 
+run_fade(session_t *ps, struct managed_win **_w, unsigned int steps) 
+{
 	auto w = *_w;
-	if (w->state == WSTATE_MAPPED || w->state == WSTATE_UNMAPPED) {
+	if (w->state == WSTATE_MAPPED || w->state == WSTATE_UNMAPPED) 
+	{
 		// We are not fading
-		assert(w->opacity_target == w->opacity);
+		assert(!animatable_is_animating(&w->opacity));
+		assert(!animatable_is_animating(&w->blur_opacity));
 		return false;
 	}
 
-	if (!win_should_fade(ps, w)) {
+	if (!win_should_fade(ps, w)) 
+	{
 		log_debug("Window %#010x %s doesn't need fading", w->base.id, w->name);
-		w->opacity = w->opacity_target;
+		animatable_early_stop(&w->opacity);
+		animatable_early_stop(&w->blur_opacity);
 	}
-	if (w->opacity == w->opacity_target) {
+	if (!animatable_is_animating(&w->opacity) &&
+	    !animatable_is_animating(&w->blur_opacity)) {
 		// We have reached target opacity.
 		// We don't call win_check_fade_finished here because that could destroy
 		// the window, but we still need the damage info from this window
@@ -263,21 +271,14 @@ static bool run_fade(session_t *ps, struct managed_win **_w, long long steps) {
 		return false;
 	}
 
-	if (steps) {
-		log_trace("Window %#010x (%s) opacity was: %lf", w->base.id, w->name,
-		          w->opacity);
-		if (w->opacity < w->opacity_target) {
-			w->opacity = clamp(w->opacity + ps->o.fade_in_step * (double)steps,
-			                   0.0, w->opacity_target);
-		} else {
-			w->opacity = clamp(w->opacity - ps->o.fade_out_step * (double)steps,
-			                   w->opacity_target, 1);
-		}
-		log_trace("... updated to: %lf", w->opacity);
-	}
+	log_trace("|- fading, opacity: %lf", animatable_get(&w->opacity));
+	animatable_step(&w->opacity, steps);
+	animatable_step(&w->blur_opacity, steps);
+	log_trace("|- opacity updated: %lf (%u steps)", animatable_get(&w->opacity), steps);
 
-	// Note even if opacity == opacity_target here, we still want to run preprocess
-	// one last time to finish state transition. So return true in that case too.
+	// Note even if the animatable is not animating anymore at this point, we still
+	// want to run preprocess one last time to finish state transition. So return true
+	// in that case too.
 	return true;
 }
 
@@ -722,30 +723,36 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 	*animation_running = false;
 
 	// Fading step calculation
-	long long steps = 0L;
+	unsigned int steps = 0L;
 	auto now = get_time_ms();
-	if (ps->fade_time) {
+	if (ps->fade_time)
+	{
 		assert(now >= ps->fade_time);
-		steps = (now - ps->fade_time) / ps->o.fade_delta;
-	} else {
+		auto raw_steps = (now - ps->fade_time) / ps->o.fade_delta;
+		assert(raw_steps <= UINT_MAX);
+		steps = (unsigned int)raw_steps;
+		ps->fade_time += raw_steps * ps->o.fade_delta;
+	} 
+	else 
+	{
 		// Reset fade_time if unset
 		ps->fade_time = get_time_ms();
 		steps = 0L;
 	}
-	ps->fade_time += steps * ps->o.fade_delta;
 
-	if (ps->o.animations && !ps->animation_time)
+	if (ps->o.animations && !ps->animation_time) {
 		ps->animation_time = now;
+	}	
 
 	double delta_secs = (double)(now - ps->animation_time) / 1000;
 
 	// First, let's process fading, and animated shaders
 	// TODO(yshui) check if a window is fully obscured, and if we don't need to
 	//             process fading or animation for it.
-	win_stack_foreach_managed_safe(w, &ps->window_stack) {
+	win_stack_foreach_managed_safe(w, &ps->window_stack) 
+	{
 		const winmode_t mode_old = w->mode;
 		const bool was_painted = w->to_paint;
-		const double opacity_old = w->opacity;
 
 		// IMPORTANT: These window animation steps must happen before any other
 		// [pre]processing. This is because it changes the window's geometry.
@@ -769,8 +776,10 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 			double neg_displacement_h = w->animation_dest_h - w->animation_h;
 			double animation_stiffness = ps->o.animation_stiffness;
 
-			if (w->state == WSTATE_FADING)
-				w->opacity_target = win_calc_opacity_target(ps, w);
+			// TODO:Kirill check if needed
+			// if (w->state == WSTATE_FADING) {
+			// 	w->opacity_target = win_calc_opacity_target(ps, w);
+			// }
 
 			double acceleration_x =
 			    (animation_stiffness * neg_displacement_x -
@@ -932,7 +941,9 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 				w->animation_velocity_y = 0.0;
 				w->animation_velocity_w = 0.0;
 				w->animation_velocity_h = 0.0;
-				w->opacity = win_calc_opacity_target(ps, w);
+
+				// TODO:Kirill check if needed
+				// w->opacity = win_calc_opacity_target(ps, w);
 			}
 			*animation_running = true;
 		}
@@ -947,20 +958,19 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 			*animation_running = true;
 		}
 
+		// Add window to damaged area if its opacity changes
+		// If was_painted == false, and to_paint is also false, we don't care
+		// If was_painted == false, but to_paint is true, damage will be added in the loop below
+		if (was_painted && animatable_is_animating(&w->opacity)) {
+			add_damage_from_win(ps, w);
+		}
+
 		// Run fading
 		if (run_fade(ps, &w, steps)) {
 			*fade_running = true;
 		}
 
-		// Add window to damaged area if its opacity changes
-		// If was_painted == false, and to_paint is also false, we don't care
-		// If was_painted == false, but to_paint is true, damage will be added in
-		// the loop below
-		if (was_painted && w->opacity != opacity_old) {
-			add_damage_from_win(ps, w);
-		}
-
-		if (win_check_fade_finished(ps, w)) {
+		if (win_maybe_finalize_fading(ps, w)) {
 			// the window has been destroyed because fading finished
 			continue;
 		}
@@ -997,6 +1007,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 		bool to_paint = true;
 		// w->to_paint remembers whether this window is painted last time
 		const bool was_painted = w->to_paint;
+		const double window_opacity = animatable_get(&w->opacity);
 
 		// Destroy reg_ignore if some window above us invalidated it
 		if (!reg_ignore_valid) {
@@ -1034,7 +1045,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 			          w->base.id, w->name);
 			to_paint = false;
 		} 
-		else if (unlikely((double)w->opacity * MAX_ALPHA < 1 && !w->blur_background)) {
+		else if (unlikely(window_opacity * MAX_ALPHA < 1 && !w->blur_background)) {
 			/* TODO(yshui) for consistency, even a window has 0 opacity, we
 			 * still probably need to blur its background, so to_paint
 			 * shouldn't be false for them. */
@@ -1073,7 +1084,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 		log_trace("Window %#010x (%s) will be painted", w->base.id, w->name);
 
 		// Calculate shadow opacity
-		w->shadow_opacity = ps->o.shadow_opacity * w->opacity * ps->o.frame_opacity;
+		w->shadow_opacity = ps->o.shadow_opacity * window_opacity * ps->o.frame_opacity;
 
 		// Generate ignore region for painting to reduce GPU load
 		if (!w->reg_ignore) {

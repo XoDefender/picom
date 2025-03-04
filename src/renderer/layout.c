@@ -47,8 +47,9 @@ layer_from_window(struct layer *out_layer, struct managed_win *w, struct geometr
 		goto out;
 	}
 
-	out_layer->opacity = (float)w->opacity;
-	if (out_layer->opacity == 0 && !w->blur_background) {
+	out_layer->opacity = (float)animatable_get(&w->opacity);
+	out_layer->blur_opacity = (float)animatable_get(&w->blur_opacity);
+	if (out_layer->opacity == 0 && out_layer->blur_opacity == 0) {
 		goto out;
 	}
 
