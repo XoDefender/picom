@@ -44,12 +44,19 @@ void animatable_step(struct animatable *a, unsigned int steps) {
 		a->step(a, steps);
 	}
 
-	if (a->progress == a->duration) {
+	if (a->progress == a->duration) 
+	{
 		a->start = a->target;
 		a->duration = 0;
 		a->progress = 0;
 		if (a->step_state) {
 			a->step_state->current = a->target;
+		}
+		if (a->callback) 
+		{
+			a->callback(TRANSITION_COMPLETED, a->callback_data);
+			a->callback = NULL;
+			a->callback_data = NULL;
 		}
 	}
 }
@@ -64,7 +71,8 @@ bool animatable_is_animating(const struct animatable *a) {
 /// the `animatable` will retain its current value.
 ///
 /// Returns true if the `animatable` was animated before this function is called.
-bool animatable_cancel(struct animatable *a) {
+bool animatable_cancel(struct animatable *a) 
+{
 	if (!a->duration) {
 		return false;
 	}
@@ -76,13 +84,21 @@ bool animatable_cancel(struct animatable *a) {
 	if (a->step_state) {
 		a->step_state->current = a->start;
 	}
+	if (a->callback) 
+	{
+		a->callback(TRANSITION_CANCELED, a->callback_data);
+		a->callback = NULL;
+		a->callback_data = NULL;
+	}
+
 	return true;
 }
 
 /// Cancel the current animation of an `animatable` and set its value to its target.
 ///
 /// Returns true if the `animatable` was animated before this function is called.
-bool animatable_early_stop(struct animatable *a) {
+bool animatable_early_stop(struct animatable *a) 
+{
 	if (!a->duration) {
 		return false;
 	}
@@ -93,16 +109,25 @@ bool animatable_early_stop(struct animatable *a) {
 	if (a->step_state) {
 		a->step_state->current = a->target;
 	}
+	if (a->callback) 
+	{
+		a->callback(TRANSITION_STOPPED_EARLY, a->callback_data);
+		a->callback = NULL;
+		a->callback_data = NULL;
+	}
+
 	return true;
 }
 
 /// Change the target value of an `animatable`.
 /// If the `animatable` is already animating, the animation will be canceled first.
-void animatable_set_target(struct animatable *a, double target, unsigned int duration) {
+void animatable_set_target(struct animatable *a, double target, unsigned int duration,
+						   transition_callback_fn cb, void *data) {
 	animatable_cancel(a);
 	if (!duration) {
 		a->start = target;
 		a->target = target;
+		if (cb) {cb(TRANSITION_COMPLETED, data);}
 		return;
 	}
 
@@ -112,6 +137,8 @@ void animatable_set_target(struct animatable *a, double target, unsigned int dur
 	if (a->step_state) {
 		a->step(a, 0);
 	}
+	a->callback = cb;
+	a->callback_data = data;
 }
 
 /// Create a new animatable.

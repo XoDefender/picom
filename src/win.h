@@ -386,6 +386,10 @@ struct managed_win {
 	/// The custom window shader to use when rendering.
 	struct shader_info *fg_shader;
 
+	// Animation related
+	/// Number of animations currently in progress
+	unsigned int number_of_animations;
+
 #ifdef CONFIG_OPENGL
 	/// Textures and FBO background blur use.
 	glx_blur_cache_t glx_blur_cache;
