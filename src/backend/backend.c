@@ -137,7 +137,7 @@ try_blur_target(session_t *ps, struct managed_win *w, coord_t window_coord,
 static void 
 try_shadow_target(session_t *ps, struct managed_win *w, coord_t window_coord, 
 				 region_t *reg_paint, region_t *reg_visible, region_t *reg_shadow_clip, 
-				 region_t *reg_bound_no_corner) {
+				 region_t *reg_bound_no_corner, double window_opacity) {
 	// Draw shadow on target
 	if (w->shadow) 
 	{
@@ -172,7 +172,8 @@ try_shadow_target(session_t *ps, struct managed_win *w, coord_t window_coord,
 
 		assert(w->shadow_image);
 
-		ps->backend_data->ops->set_image_property(ps->backend_data, IMAGE_PROPERTY_OPACITY, w->shadow_image, &w->opacity);
+		ps->backend_data->ops->set_image_property(ps->backend_data, IMAGE_PROPERTY_OPACITY, 
+												  w->shadow_image, &window_opacity);
 
 		coord_t shadow_coord = {.x = w->g.x + w->shadow_dx,
 		                        .y = w->g.y + w->shadow_dy};
@@ -486,7 +487,8 @@ void paint_all_new(session_t *ps, struct managed_win *bottom, bool ignore_damage
 		// Put shadow on window
 		try_shadow_target(ps, w, window_coord, 
 						 &reg_paint, &reg_visible, 
-						 &reg_shadow_clip, &reg_bound_no_corner);
+						 &reg_shadow_clip, &reg_bound_no_corner,
+						 window_opacity);
 
 		// Update image properties
 		update_img_props(ps, w, window_opacity);
