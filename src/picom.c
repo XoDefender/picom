@@ -738,19 +738,20 @@ static double swopti_handle_timeout(session_t *ps)
 	// I don't think a 32-bit long could overflow here.
 	long offset = (get_time_timeval().tv_usec - ps->paint_tm_offset) % ps->refresh_intv;
 	// XXX this formula dones't work if refresh rate is not a whole number
-	if (offset < 0)
+	if (offset < 0) {
 		offset += ps->refresh_intv;
+	}
 
 	// If the target time is sufficiently close to a refresh time, don't add
 	// an offset, to avoid certain blocking conditions.
-	if (offset < SWOPTI_TOLERANCE || offset > ps->refresh_intv - SWOPTI_TOLERANCE)
+	if (offset < SWOPTI_TOLERANCE || offset > ps->refresh_intv - SWOPTI_TOLERANCE) {
 		return 0;
+	}
 
 	// Add an offset so we wait until the next refresh after timeout
 	return (double)(ps->refresh_intv - offset) / 1e6;
 }
 
-// Kirill
 static void animation_timer_callback(EV_P attr_unused, ev_timer *w, int revents attr_unused) {
 	session_t *ps = session_ptr(w, animation_timer);
 	queue_redraw(ps);
