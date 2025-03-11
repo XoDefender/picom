@@ -147,6 +147,9 @@ typedef struct session {
 	ev_timer unredir_timer;
 	/// Timer for fading
 	ev_timer fade_timer;
+	/// Timer for delayed drawing
+	/// right now only used with --refresh-rate
+	ev_timer delayed_draw_timer;
 	/// Timer for animations
 	ev_timer animation_timer;
 	/// Use an ev_idle callback for drawing
@@ -325,6 +328,10 @@ typedef struct session {
 	region_t shadow_exclude_reg;
 
 	// === Software-optimization-related ===
+	/// Currently used refresh rate.
+	int refresh_rate;
+	/// Interval between refresh in nanoseconds.
+	long refresh_intv;
 	/// Nanosecond offset of the first painting.
 	long paint_tm_offset;
 

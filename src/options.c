@@ -72,7 +72,6 @@ static const struct picom_option picom_options[] = {
                                                                              "managers not passing _NET_WM_WINDOW_OPACITY of client windows to frame"},
     {"refresh-rate"                , required_argument, 269, NULL          , NULL},
     {"vsync"                       , optional_argument, 270, NULL          , "Enable VSync"},
-    {"sw-opti"                     , no_argument      , 274, NULL          , NULL},
     {"vsync-aggressive"            , no_argument      , 275, NULL          , NULL},
     {"use-ewmh-active-win"         , no_argument      , 276, NULL          , "Use _NET_WM_ACTIVE_WINDOW on the root window to determine which window is "
                                                                              "focused instead of using FocusIn/Out events"},
@@ -499,10 +498,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		P_CASEBOOL(266, shadow_ignore_shaped);
 		P_CASEBOOL(267, detect_rounded_corners);
 		P_CASEBOOL(268, detect_client_opacity);
-		case 269:
-			log_warn("--refresh-rate has been deprecated, please remove it from"
-			         "your command line options");
-			break;
+		P_CASEINT(269, refresh_rate);
 		case 270:
 			if (optarg) {
 				bool parsed_vsync = parse_vsync(optarg);
@@ -513,10 +509,6 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			} else {
 				opt->vsync = true;
 			}
-			break;
-		case 274:
-			log_warn("--sw-opti has been deprecated, please remove it from the "
-			         "command line options");
 			break;
 		case 275:
 			// --vsync-aggressive

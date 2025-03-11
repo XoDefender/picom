@@ -70,6 +70,8 @@
 		(session_t *)((char *)__mptr - offsetof(session_t, member));             \
 	})
 
+static const long SWOPTI_TOLERANCE = 3000;
+
 static bool must_use redirect_start(session_t *ps);
 
 static void unredirect(session_t *ps);
@@ -705,6 +707,47 @@ static void handle_root_flags(session_t *ps) {
 		configure_root(ps);
 		ps->root_flags &= ~(uint64_t)ROOT_FLAGS_CONFIGURED;
 	}
+}
+
+/**
+ * Initialize refresh-rated based software optimization.
+ *
+ * @return true for success, false otherwise
+ */
+static void swopti_init(session_t *ps) 
+{
+	// Prepare refresh rate and check if user provides one
+	ps->refresh_rate = ps->o.refresh_rate;
+	if (ps->refresh_rate)
+		ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
+}
+
+/**
+ * Modify a struct timeval timeout value to render at a fixed pace.
+ *
+ * @param ps current session
+ * @param[in,out] ptv pointer to the timeout
+ */
+static double swopti_handle_timeout(session_t *ps) 
+{
+	if (!ps->refresh_intv) {
+		return 0;
+	}
+
+	// Get the microsecond offset of the time when the we reach the timeout
+	// I don't think a 32-bit long could overflow here.
+	long offset = (get_time_timeval().tv_usec - ps->paint_tm_offset) % ps->refresh_intv;
+	// XXX this formula dones't work if refresh rate is not a whole number
+	if (offset < 0)
+		offset += ps->refresh_intv;
+
+	// If the target time is sufficiently close to a refresh time, don't add
+	// an offset, to avoid certain blocking conditions.
+	if (offset < SWOPTI_TOLERANCE || offset > ps->refresh_intv - SWOPTI_TOLERANCE)
+		return 0;
+
+	// Add an offset so we wait until the next refresh after timeout
+	return (double)(ps->refresh_intv - offset) / 1e6;
 }
 
 // Kirill
@@ -1820,13 +1863,15 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 		ps->animation_time = 0L;
 	}
 
+	ps->redraw_needed = 0;
+
 	// TODO(yshui) Investigate how big the X critical section needs to be. There are
 	// suggestions that rendering should be in the critical section as well.
-
-	ps->redraw_needed = animation;
 }
 
-static void draw_callback(EV_P_ ev_idle *w, int revents) {
+static void draw_callback(EV_P_ ev_idle *w, int revents) 
+{
+	// This function is not used if we are using --refresh-rate
 	session_t *ps = session_ptr(w, draw_idle);
 
 	draw_callback_impl(EV_A_ ps, revents);
@@ -1836,6 +1881,49 @@ static void draw_callback(EV_P_ ev_idle *w, int revents) {
 	if (!ps->o.benchmark && !ps->redraw_needed) {
 		ev_idle_stop(EV_A_ & ps->draw_idle);
 	}
+}
+
+static void delayed_draw_timer_callback(EV_P_ ev_timer *w, int revents) 
+{
+	session_t *ps = session_ptr(w, delayed_draw_timer);
+	draw_callback_impl(EV_A_ ps, revents);
+
+	// We might have stopped the ev_idle in delayed_draw_callback,
+	// so we restart it if we are in benchmark mode
+	if (ps->o.benchmark) {
+		ev_idle_start(EV_A_ & ps->draw_idle);
+	}
+}
+
+static void delayed_draw_callback(EV_P_ ev_idle *w, int revents) 
+{
+	// This function is only used if we are using --swopti
+	session_t *ps = session_ptr(w, draw_idle);
+	assert(ps->redraw_needed);
+	assert(!ev_is_active(&ps->delayed_draw_timer));
+
+	double delay = swopti_handle_timeout(ps);
+	if (delay < 1e-6) {
+		if (!ps->o.benchmark) {
+			ev_idle_stop(EV_A_ & ps->draw_idle);
+		}
+		return draw_callback_impl(EV_A_ ps, revents);
+	}
+
+	// This is a little bit hacky. When we get to this point in code, we need
+	// to update the screen , but we will only be updating after a delay, So
+	// we want to stop the ev_idle, so this callback doesn't get call repeatedly
+	// during the delay, we also want queue_redraw to not restart the ev_idle.
+	// So we stop ev_idle and leave ps->redraw_needed to be true. (effectively,
+	// ps->redraw_needed means if redraw is needed or if draw is in progress).
+	//
+	// We do this anyway even if we are in benchmark mode. That means we will
+	// have to restart draw_idle after the draw actually happened when we are in
+	// benchmark mode.
+	ev_idle_stop(EV_A_ & ps->draw_idle);
+
+	ev_timer_set(&ps->delayed_draw_timer, delay, 0);
+	ev_timer_start(EV_A_ & ps->delayed_draw_timer);
 }
 
 static void x_event_callback(EV_P attr_unused, ev_io *w, int revents attr_unused) {
@@ -1981,6 +2069,10 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	    .white_picture = XCB_NONE,
 	    .shadow_context = NULL,
 		.shadow_context_active = NULL,
+
+		.refresh_rate = 0,
+	    .refresh_intv = 0UL,
+	    .paint_tm_offset = 0L,
 
 #ifdef CONFIG_VSYNC_DRM
 	    .drm_fd = -1,
@@ -2442,6 +2534,11 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		}
 	}
 
+	// Initialize software optimization
+	if (ps->o.refresh_rate) {
+		swopti_init(ps);
+	}
+
 	// Monitor screen changes if vsync_sw is enabled and we are using
 	// an auto-detected refresh rate, or when Xinerama features are enabled
 	if (ps->randr_exists && ps->o.xinerama_shadow_crop) {
@@ -2467,7 +2564,15 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	ev_io_init(&ps->xiow, x_event_callback, ConnectionNumber(ps->dpy), EV_READ);
 	ev_io_start(ps->loop, &ps->xiow);
 	ev_init(&ps->unredir_timer, tmout_unredir_callback);
-	ev_idle_init(&ps->draw_idle, draw_callback);
+	
+	if (ps->o.refresh_rate) {
+		ev_idle_init(&ps->draw_idle, delayed_draw_callback);
+	} else {
+		ev_idle_init(&ps->draw_idle, draw_callback);
+	}
+ 
+ 	ev_init(&ps->fade_timer, fade_timer_callback);
+	ev_init(&ps->delayed_draw_timer, delayed_draw_timer_callback);
 
 	ev_init(&ps->fade_timer, fade_timer_callback);
 
@@ -2783,7 +2888,11 @@ static void session_destroy(session_t *ps) {
  *
  * @param ps current session
  */
-static void session_run(session_t *ps) {
+static void session_run(session_t *ps) 
+{
+	if (ps->o.refresh_rate) {
+		ps->paint_tm_offset = get_time_timeval().tv_usec;
+	}
 	// In benchmark mode, we want draw_idle handler to always be active
 	if (ps->o.benchmark) {
 		ev_idle_start(ps->loop, &ps->draw_idle);

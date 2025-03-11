@@ -450,11 +450,6 @@ static inline void parse_wintype_config(const config_t *cfg, const char *member_
 char *parse_config_libconfig(options_t *opt, const char *config_file, bool *shadow_enable,
                              bool *fading_enable, bool *conv_kern_hasneg,
                              win_option_mask_t *winopt_mask) {
-
-	const char *deprecation_message =
-	    "option has been deprecated. Please remove it from your configuration file. "
-	    "If you encounter any problems without this feature, please feel free to "
-	    "open a bug report";
 	char *path = NULL;
 	FILE *f;
 	config_t cfg;
@@ -598,8 +593,11 @@ char *parse_config_libconfig(options_t *opt, const char *config_file, bool *shad
 	// --enable-transparency //alex
     lcfg_lookup_bool(&cfg, "enable-transparency", &opt->enable_transparency); //alex
 	// --refresh-rate
-	if (config_lookup_int(&cfg, "refresh-rate", &ival)) {
-		log_warn("The refresh-rate %s", deprecation_message);
+	if (config_lookup_int(&cfg, "refresh-rate", &opt->refresh_rate)) {
+		if (opt->refresh_rate < 0) {
+			log_warn("Invalid refresh rate %d, fallback to 0", opt->refresh_rate);
+			opt->refresh_rate = 0;
+		}
 	}
 	// --vsync
 	if (config_lookup_string(&cfg, "vsync", &sval)) {
@@ -634,10 +632,6 @@ char *parse_config_libconfig(options_t *opt, const char *config_file, bool *shad
 			         "absolute path");
 		}
 		opt->logpath = strdup(sval);
-	}
-	// --sw-opti
-	if (lcfg_lookup_bool(&cfg, "sw-opti", &bval)) {
-		log_warn("The sw-opti %s", deprecation_message);
 	}
 	// --use-ewmh-active-win
 	lcfg_lookup_bool(&cfg, "use-ewmh-active-win", &opt->use_ewmh_active_win);
