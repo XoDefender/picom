@@ -48,8 +48,10 @@ typedef uint32_t cdbus_enum_t;
 #define CDBUS_TYPE_ENUM_STR DBUS_TYPE_UINT32_AS_STRING
 
 #define CDBUS_SERVICE_NAME "com.github.chjj.compton"
+#define CDBUS_SERVICE_POWER_MANAGEMENT_NAME "org.kde.Solid.PowerManagement"
 #define CDBUS_INTERFACE_NAME CDBUS_SERVICE_NAME
 #define CDBUS_OBJECT_NAME "/com/github/chjj/compton"
+#define CDBUS_OBJECT_POWER_MANAGEMENT_NAME "/org/kde/Solid/PowerManagement"
 #define CDBUS_ERROR_PREFIX CDBUS_INTERFACE_NAME ".error"
 #define CDBUS_ERROR_UNKNOWN CDBUS_ERROR_PREFIX ".unknown"
 #define CDBUS_ERROR_UNKNOWN_S "Well, I don't know what happened. Do you?"
@@ -176,8 +178,9 @@ bool cdbus_init(session_t *ps, const char *uniq) {
 	}
 
 	// Add match
-	dbus_bus_add_match(cd->dbus_conn,
-	                   "type='method_call',interface='" CDBUS_INTERFACE_NAME "'", &err);
+	dbus_bus_add_match(cd->dbus_conn, "type='method_call',interface='" CDBUS_INTERFACE_NAME "'", &err);
+	dbus_bus_add_match(cd->dbus_conn, "type='signal',member='profileChanged',interface='" CDBUS_SERVICE_POWER_MANAGEMENT_NAME "'", &err);
+
 	if (dbus_error_is_set(&err)) {
 		log_error("Failed to add D-Bus match.");
 		dbus_error_free(&err);
@@ -186,9 +189,13 @@ bool cdbus_init(session_t *ps, const char *uniq) {
 	dbus_connection_register_object_path(
 	    cd->dbus_conn, CDBUS_OBJECT_NAME,
 	    (DBusObjectPathVTable[]){{NULL, cdbus_process}}, ps);
+	dbus_connection_register_object_path(
+	    cd->dbus_conn, CDBUS_OBJECT_POWER_MANAGEMENT_NAME,
+	    (DBusObjectPathVTable[]){{NULL, cdbus_process}}, ps);
 	dbus_connection_register_fallback(
 	    cd->dbus_conn, CDBUS_OBJECT_NAME "/windows",
 	    (DBusObjectPathVTable[]){{NULL, cdbus_process_windows}}, ps);
+
 	return true;
 fail:
 	ps->dbus_data = NULL;
@@ -1494,6 +1501,29 @@ static bool cdbus_process_window_introspect(session_t *ps, DBusMessage *msg) {
 	return cdbus_reply_string(ps, msg, str_introspect);
 }
 
+static bool cdbus_process_profile_changed(session_t *ps, DBusMessage *msg) 
+{
+	const char *in_string = NULL;
+	DBusError err = {};
+	if(!dbus_message_get_args(msg, &err, DBUS_TYPE_STRING, &in_string, DBUS_TYPE_INVALID)) 
+	{
+		log_error("Failed to parse argument of \"profileChanged\" (%s).", 
+				  err.message);
+		dbus_error_free(&err);
+	}
+	else if(in_string && ps->refresh_rate) 
+	{
+		if(!strcmp(in_string, "AC") || !strcmp(in_string, "Battery")) {
+			ps->refresh_intv = 0;
+		}
+		else if(!strcmp(in_string, "LowBattery")) {
+			ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
+		}
+	}
+
+	return true;
+}
+
 /**
  * Process a message from D-Bus.
  */
@@ -1547,6 +1577,8 @@ cdbus_process(DBusConnection *c attr_unused, DBusMessage *msg, void *ud) {
 	} else if (dbus_message_is_signal(msg, "org.freedesktop.DBus", "NameAcquired") ||
 	           dbus_message_is_signal(msg, "org.freedesktop.DBus", "NameLost")) {
 		handled = true;
+	} else if (dbus_message_is_signal(msg, CDBUS_SERVICE_POWER_MANAGEMENT_NAME, "profileChanged")) {
+		handled = cdbus_process_profile_changed(ps, msg);
 	} else {
 		if (DBUS_MESSAGE_TYPE_ERROR == dbus_message_get_type(msg)) {
 			log_error(
@@ -1561,9 +1593,10 @@ cdbus_process(DBusConnection *c attr_unused, DBusMessage *msg, void *ud) {
 			          dbus_message_get_interface(msg),
 			          dbus_message_get_member(msg));
 		}
-		if (DBUS_MESSAGE_TYPE_METHOD_CALL == dbus_message_get_type(msg) &&
-		    !dbus_message_get_no_reply(msg))
-			cdbus_reply_err(ps, msg, CDBUS_ERROR_BADMSG, CDBUS_ERROR_BADMSG_S);
+		if (DBUS_MESSAGE_TYPE_METHOD_CALL == dbus_message_get_type(msg) && 
+			!dbus_message_get_no_reply(msg)) {
+				cdbus_reply_err(ps, msg, CDBUS_ERROR_BADMSG, CDBUS_ERROR_BADMSG_S);
+		}
 		handled = true;
 	}
 

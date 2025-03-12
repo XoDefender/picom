@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "functional": "c"
+        "functional": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c"
     }
 }

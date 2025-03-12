@@ -710,16 +710,17 @@ static void handle_root_flags(session_t *ps) {
 }
 
 /**
- * Initialize refresh-rated based software optimization.
- *
- * @return true for success, false otherwise
+ * Initialize refresh-rated based software optimization
  */
 static void swopti_init(session_t *ps) 
 {
-	// Prepare refresh rate and check if user provides one
 	ps->refresh_rate = ps->o.refresh_rate;
-	if (ps->refresh_rate)
+	if(ps->refresh_rate && !ps->o.dbus) {
 		ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
+	}
+	else if(ps->refresh_rate && ps->o.dbus) {
+		// Make request to current power profile
+	}
 }
 
 /**
