@@ -719,7 +719,13 @@ static void swopti_init(session_t *ps)
 		ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
 	}
 	else if(ps->refresh_rate && ps->o.dbus) {
-		// Make request to current power profile
+		char* profile = cdbus_get_current_power_profile(ps);
+		if(profile && (!strcmp(profile, "AC") || !strcmp(profile, "Battery"))) {
+			ps->refresh_intv = 0;	
+		}
+		else if(profile && !strcmp(profile, "LowBattery")) {
+			ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
+		}
 	}
 }
 
@@ -2536,11 +2542,6 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		}
 	}
 
-	// Initialize software optimization
-	if (ps->o.refresh_rate) {
-		swopti_init(ps);
-	}
-
 	// Monitor screen changes if vsync_sw is enabled and we are using
 	// an auto-detected refresh rate, or when Xinerama features are enabled
 	if (ps->randr_exists && ps->o.xinerama_shadow_crop) {
@@ -2616,6 +2617,11 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 		log_fatal("DBus support not compiled in!");
 		exit(1);
 #endif
+	}
+
+	// Initialize software optimization
+	if (ps->o.refresh_rate) {
+		swopti_init(ps);
 	}
 
 	e = xcb_request_check(ps->c, xcb_grab_server_checked(ps->c));

@@ -1524,6 +1524,33 @@ static bool cdbus_process_profile_changed(session_t *ps, DBusMessage *msg)
 	return true;
 }
 
+char* cdbus_get_current_power_profile(session_t *ps)
+{
+	char *in_string = NULL;
+	DBusError err = {};
+	DBusMessage *msg, *reply;
+	msg = dbus_message_new_method_call(CDBUS_SERVICE_POWER_MANAGEMENT_NAME, CDBUS_OBJECT_POWER_MANAGEMENT_NAME,
+									   CDBUS_SERVICE_POWER_MANAGEMENT_NAME, "currentProfile");
+	
+	struct cdbus_data *cd = ps->dbus_data;
+	if (!cd->dbus_conn) {
+		return NULL;
+	}
+	
+	reply = dbus_connection_send_with_reply_and_block(cd->dbus_conn, msg, -1, &err);
+    dbus_message_unref(msg); 
+
+    if (!reply) {
+        return NULL;
+    }
+
+    if (dbus_message_get_args(reply, &err, DBUS_TYPE_STRING, &in_string, DBUS_TYPE_INVALID)) {
+        return in_string;
+    }
+
+	return NULL;
+}
+
 /**
  * Process a message from D-Bus.
  */

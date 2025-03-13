@@ -51,4 +51,7 @@ void cdbus_ev_win_focusout(session_t *ps, struct win *w);
 /// Generate dbus win_focusin signal
 void cdbus_ev_win_focusin(session_t *ps, struct win *w);
 
+/// Get current power profile
+char* cdbus_get_current_power_profile(session_t *ps);
+
 // vim: set noet sw=8 ts=8 :
