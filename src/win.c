@@ -589,28 +589,33 @@ static void win_update_properties(session_t *ps, struct managed_win *w) {
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_KDE_NET_WM_BLUR_BEHIND_REGION)) {
 		win_update_blur_prop(ps, w, ps->atoms->a_KDE_NET_WM_BLUR_BEHIND_REGION,
 		                     &w->has_blur_presence_prop, &w->blur_presence_prop);
+		add_damage_from_win(ps, w);
 	}
 
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_SIZE)) {
 		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_SIZE,
 		                     &w->has_blur_size_prop, &w->blur_size_prop);
+		add_damage_from_win(ps, w);
 	}
 
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_STRENGTH)) {
 		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_STRENGTH,
 		                     &w->has_blur_strength_prop, &w->blur_strength_prop);
+		add_damage_from_win(ps, w);
 	}
 
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_DEVIATION)) {
 		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_DEVIATION,
 		                     &w->has_blur_deviation_prop, &w->blur_deviation_prop);
+		add_damage_from_win(ps, w);
 	}
 
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->a_FLY_WM_BLUR_METHOD)) {
 		win_update_blur_prop(ps, w, ps->atoms->a_FLY_WM_BLUR_METHOD,
 		                     &w->has_blur_method_prop, &w->blur_method_prop);
+		add_damage_from_win(ps, w);
 	}
-
+	
 	if (win_fetch_and_unset_property_stale(w, ps->atoms->aWM_CLIENT_LEADER) ||
 	    win_fetch_and_unset_property_stale(w, ps->atoms->aWM_TRANSIENT_FOR)) {
 		win_update_leader(ps, w);
@@ -2740,6 +2745,7 @@ struct win *fill_win(session_t *ps, struct win *w) {
 	    ps->atoms->a_FLY_WM_BLUR_STRENGTH,
 	    ps->atoms->a_FLY_WM_BLUR_DEVIATION,
 	    ps->atoms->a_FLY_WM_BLUR_METHOD,
+		ps->atoms->a_KDE_NET_WM_BLUR_BEHIND_REGION,
 	};
 	win_set_properties_stale(new, init_stale_props, ARR_SIZE(init_stale_props));
 
