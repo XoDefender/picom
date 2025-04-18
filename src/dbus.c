@@ -31,10 +31,16 @@
 
 #include "dbus.h"
 
+typedef enum {
+	DBUS_SESSION_WATCH,
+	DBUS_SYSTEM_WATCH,
+} dbus_watch_type;
+
 struct cdbus_data {
 	/// DBus connection.
 	DBusConnection *dbus_session_conn;
 	DBusConnection *dbus_system_conn;
+	dbus_watch_type watch_type;
 	/// DBus service name.
 	char *dbus_service;
 };
@@ -88,12 +94,26 @@ static void cdbus_callback_remove_timeout(DBusTimeout *timeout, void *data);
 
 static void cdbus_callback_timeout_toggled(DBusTimeout *timeout, void *data);
 
-static dbus_bool_t cdbus_callback_add_session_watch(DBusWatch *watch, void *data);
-static dbus_bool_t cdbus_callback_add_system_watch(DBusWatch *watch, void *data);
+static dbus_bool_t cdbus_callback_add_watch(DBusWatch *watch, void *data);
 
 static void cdbus_callback_remove_watch(DBusWatch *watch, void *data);
 
 static void cdbus_callback_watch_toggled(DBusWatch *watch, void *data);
+
+static bool 
+cdbus_set_watch_handler(struct cdbus_data *cd, session_t *ps, dbus_watch_type watch_type) 
+{
+	cd->watch_type = watch_type;
+	DBusConnection *conn = watch_type == DBUS_SESSION_WATCH ? cd->dbus_session_conn : cd->dbus_system_conn;
+	if (!dbus_connection_set_watch_functions(conn, cdbus_callback_add_watch,
+											cdbus_callback_remove_watch, 
+											cdbus_callback_watch_toggled, 
+											ps, NULL)) {
+		return false;
+	}
+
+	return true;
+}
 
 /**
  * Initialize D-Bus connection.
@@ -164,18 +184,10 @@ bool cdbus_init(session_t *ps, const char *uniq) {
 			goto fail;
 		}
 	}
-
+	
 	// Add watch handlers
-	if (!dbus_connection_set_watch_functions(cd->dbus_session_conn, cdbus_callback_add_session_watch,
-	                                         cdbus_callback_remove_watch,
-	                                         cdbus_callback_watch_toggled, ps, NULL)) {
-		log_error("Failed to add D-Bus watch functions.");
-		goto fail;
-	}
-
-	if (!dbus_connection_set_watch_functions(cd->dbus_system_conn, cdbus_callback_add_system_watch,
-	                                         cdbus_callback_remove_watch,
-	                                         cdbus_callback_watch_toggled, ps, NULL)) {
+	if(!cdbus_set_watch_handler(cd, ps, DBUS_SESSION_WATCH) ||
+	   !cdbus_set_watch_handler(cd, ps, DBUS_SYSTEM_WATCH)) {
 		log_error("Failed to add D-Bus watch functions.");
 		goto fail;
 	}
@@ -238,6 +250,11 @@ void cdbus_destroy(session_t *ps) {
 		// Close and unref the connection
 		dbus_connection_close(cd->dbus_session_conn);
 		dbus_connection_unref(cd->dbus_session_conn);
+	}
+	if(cd->dbus_system_conn) {
+		// Close and unref the connection
+		dbus_connection_close(cd->dbus_system_conn);
+		dbus_connection_unref(cd->dbus_system_conn);
 	}
 	free(cd);
 }
@@ -326,8 +343,13 @@ void cdbus_io_session_callback(EV_P attr_unused, ev_io *w, int revents) {
 	if (revents & EV_WRITE)
 		flags |= DBUS_WATCH_WRITABLE;
 	dbus_watch_handle(dw->dw, flags);
-	while (dbus_connection_dispatch(dw->cd->dbus_session_conn) != DBUS_DISPATCH_COMPLETE)
-		;
+
+	if(dw->cd->watch_type == DBUS_SESSION_WATCH) {
+		while (dbus_connection_dispatch(dw->cd->dbus_session_conn) != DBUS_DISPATCH_COMPLETE);
+	}
+	else if (dw->cd->watch_type == DBUS_SYSTEM_WATCH) {
+		while (dbus_connection_dispatch(dw->cd->dbus_system_conn) != DBUS_DISPATCH_COMPLETE);
+	}
 }
 
 void cdbus_io_system_callback(EV_P attr_unused, ev_io *w, int revents) {
@@ -359,32 +381,14 @@ static inline int cdbus_get_watch_cond(DBusWatch *watch) {
 /**
  * Callback for adding D-Bus watch.
  */
-static dbus_bool_t cdbus_callback_add_session_watch(DBusWatch *watch, void *data) {
+static dbus_bool_t cdbus_callback_add_watch(DBusWatch *watch, void *data) 
+{
 	session_t *ps = data;
 
 	auto w = ccalloc(1, ev_dbus_io);
 	w->dw = watch;
 	w->cd = ps->dbus_data;
 	ev_io_init(&w->w, cdbus_io_session_callback, dbus_watch_get_unix_fd(watch),
-	           cdbus_get_watch_cond(watch));
-
-	// Leave disabled watches alone
-	if (dbus_watch_get_enabled(watch))
-		ev_io_start(ps->loop, &w->w);
-
-	dbus_watch_set_data(watch, w, NULL);
-
-	// Always return true
-	return true;
-}
-
-static dbus_bool_t cdbus_callback_add_system_watch(DBusWatch *watch, void *data) {
-	session_t *ps = data;
-
-	auto w = ccalloc(1, ev_dbus_io);
-	w->dw = watch;
-	w->cd = ps->dbus_data;
-	ev_io_init(&w->w, cdbus_io_system_callback, dbus_watch_get_unix_fd(watch),
 	           cdbus_get_watch_cond(watch));
 
 	// Leave disabled watches alone
