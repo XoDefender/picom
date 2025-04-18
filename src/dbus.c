@@ -1561,11 +1561,11 @@ static bool cdbus_process_profile_changed(session_t *ps, DBusMessage *msg)
 
 	if(is_changed && profile && ps->refresh_rate) 
 	{
-		if(!strcmp(profile, "AC") || !strcmp(profile, "Battery")) {
-			ps->refresh_intv = 0;
-		}
-		else if(!strcmp(profile, "LowBattery")) {
+		if(!strcmp(profile, "powersave")) {
 			ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
+		}
+		else {
+			ps->refresh_intv = 0;
 		}
 	}
 
