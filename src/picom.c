@@ -720,11 +720,11 @@ static void swopti_init(session_t *ps)
 	}
 	else if(ps->refresh_rate && ps->o.dbus) {
 		char* profile = cdbus_get_current_power_profile(ps);
-		if(profile && (!strcmp(profile, "AC") || !strcmp(profile, "Battery"))) {
-			ps->refresh_intv = 0;	
-		}
-		else if(profile && !strcmp(profile, "LowBattery")) {
+		if(profile && !strcmp(profile, "powersave")) {
 			ps->refresh_intv = US_PER_SEC / ps->refresh_rate;
+		}
+		else if (profile) {
+			ps->refresh_intv = 0;
 		}
 	}
 }
